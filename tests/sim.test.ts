@@ -14,7 +14,7 @@ import {
   type Level,
   type StationKind,
 } from "../src/core/sim.ts";
-import { LEVELS, SOLUTIONS, TRAPS, type Layout } from "../src/data/levels.ts";
+import { BOSS_TRAPS, LEVELS, SOLUTIONS, TRAPS, type Layout } from "../src/data/levels.ts";
 import { canPlace } from "../src/core/sim.ts";
 
 /** Shortest source→sink pipe by breadth-first search. */
@@ -156,3 +156,19 @@ test("stars: first-try bonus and short-pipe bonus", () => {
   assert.equal(starsFor(r, 1), 3);
   assert.equal(starsFor(r, 2), 2);
 });
+
+for (const [name, layout] of Object.entries(BOSS_TRAPS)) {
+  test(`boss trap fails with a hint: ${name}`, () => {
+    const level = LEVELS.find((l) => l.id === "black-friday")!;
+    const path = layout.path.map(([x, y]) => ({ x, y }));
+    assert.ok(isComplete(level, path), "trap pipe should be a legal pipe");
+    const placed = new Map<string, StationKind>(layout.stations.map(([[x, y], k]) => [key({ x, y }), k]));
+    for (const k of placed.keys()) {
+      const [x, y] = k.split(",").map(Number);
+      assert.ok(canPlace(level, { x, y }), `trap uses a non-pad cell ${k}`);
+    }
+    const r = simulate(level, path, placed);
+    assert.equal(r.success, false);
+    assert.ok(r.hints.length > 0, r.problems.join(" "));
+  });
+}

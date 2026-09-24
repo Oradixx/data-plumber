@@ -19,9 +19,10 @@ export class MenuScene extends Phaser.Scene {
 
     const stars = save.stars();
     // 3 × 3 zig-zag map
-    const rows = [300, 420, 540];
+    const rows = [262, 372, 482];
     const xs = [250, 500, 750];
-    const points = LEVELS.map((_, i) => {
+    const points = LEVELS.map((l, i) => {
+      if (l.boss) return { x: xs[1], y: 606 };
       const r = Math.floor(i / 3);
       const c = i % 3;
       return { x: r % 2 ? xs[2 - c] : xs[c], y: rows[r] };
@@ -38,15 +39,15 @@ export class MenuScene extends Phaser.Scene {
     LEVELS.forEach((level, i) => {
       const p = points[i];
       const unlocked = i === 0 || (stars[LEVELS[i - 1].id] ?? 0) > 0;
-      this.levelNode(p.x, p.y, i + 1, level.title.replace(/^\d+ · /, ""), unlocked, stars[level.id] ?? 0, () =>
-        this.scene.start("level", { index: i }),
-      );
+      const open = () => this.scene.start("level", { index: i });
+      if (level.boss) this.bossNode(p.x, p.y, unlocked, stars[level.id] ?? 0, open);
+      else this.levelNode(p.x, p.y, i + 1, level.title.replace(/^\d+ · /, ""), unlocked, stars[level.id] ?? 0, open);
     });
 
     const total = Object.values(stars).reduce((a, b) => a + b, 0);
     text(this, W - 30, 30, `★ ${total} / ${LEVELS.length * 3}`, 20, "#e0a800", "700").setOrigin(1, 0.5);
-    this.teaser(W / 2 - 135, 655, "Clean or Trash", C.filter);
-    this.teaser(W / 2 + 135, 655, "Data Factory", C.dedup);
+    this.teaser(150, 640, "Clean or Trash", C.filter);
+    this.teaser(W - 150, 640, "Data Factory", C.dedup);
   }
 
   private levelNode(
@@ -78,6 +79,22 @@ export class MenuScene extends Phaser.Scene {
     node.on("pointerout", () => this.tweens.add({ targets: node, scale: 1, duration: 140 }));
     node.on("pointerup", onClick);
     if (stars === 0) this.tweens.add({ targets: node, scale: 1.08, duration: 700, yoyo: true, repeat: -1 });
+  }
+
+  private bossNode(x: number, y: number, unlocked: boolean, stars: number, onClick: () => void): void {
+    const g = this.add.graphics();
+    g.fillStyle(unlocked ? 0xd94f73 : 0xd6c8b6, 1).fillRoundedRect(-150, -32, 300, 70, 24);
+    g.fillStyle(unlocked ? 0xff5d73 : C.starEmpty, 1).fillRoundedRect(-150, -38, 300, 70, 24);
+    g.fillStyle(0xffffff, 0.22).fillRoundedRect(-134, -32, 268, 12, 6);
+    const title = text(this, 0, -12, unlocked ? "👑 BOSS: Black Friday" : "🔒 BOSS", 20, "#ffffff", "700");
+    const sub = text(this, 0, 14, unlocked ? (stars ? "★".repeat(stars) + "☆".repeat(3 - stars) : "The final test") : "Finish level 9", 14, "#ffffff", "600");
+    const node = this.add.container(x, y, [g, title, sub]).setSize(300, 76);
+    if (!unlocked) return;
+    node.setInteractive({ useHandCursor: true });
+    node.on("pointerover", () => this.tweens.add({ targets: node, scale: 1.06, duration: 140 }));
+    node.on("pointerout", () => this.tweens.add({ targets: node, scale: 1, duration: 140 }));
+    node.on("pointerup", onClick);
+    if (!stars) this.tweens.add({ targets: node, angle: { from: -1.5, to: 1.5 }, duration: 380, yoyo: true, repeat: -1 });
   }
 
   private teaser(x: number, y: number, title: string, color: number): void {

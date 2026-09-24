@@ -12,6 +12,8 @@ export interface Cell {
  * - upper: the id arrives in UPPER case ("A" vs "a"): Dedup only spots it after Normalize.
  * - boxed: raw, unparsed payload. Filter and Dedup cannot look inside a box; Parse opens it.
  * - pii: carries personal data. It must be Masked before entering a public zone.
+ * - keyPii: the id itself is personal (an email). Once masked it reads "***", so a Dedup
+ *   placed after the Mask can no longer tell rows apart.
  */
 export interface BlobSpec {
   id: string;
@@ -20,6 +22,7 @@ export interface BlobSpec {
   upper?: boolean;
   boxed?: boolean;
   pii?: boolean;
+  keyPii?: boolean;
 }
 
 export type StationKind = "parse" | "filter" | "normalize" | "dedup" | "mask";
@@ -35,6 +38,7 @@ export interface Level {
   brief: string;
   lesson: { title: string; text: string };
   introduces?: StationKind[]; // stations presented in a pop-up at level start
+  boss?: boolean;
   cols: number;
   rows: number;
   source: Cell;
@@ -170,7 +174,7 @@ export function simulate(level: Level, path: Cell[], placed: Map<string, Station
       } else if (st === "normalize" && !boxed && blob.upper && !normalized) {
         normalized = true;
         events.push({ step: i, type: "normalize" });
-      } else if (st === "mask" && !masked) {
+      } else if (st === "mask" && !masked && !boxed) {
         masked = true;
         events.push({ step: i, type: "mask" });
       } else if (st === "filter" && !boxed && blob.kind === "null") {
@@ -179,7 +183,7 @@ export function simulate(level: Level, path: Cell[], placed: Map<string, Station
       } else if (st === "dedup" && !boxed && blob.kind === "ok") {
         const seen = dedupMemory.get(i) ?? new Set<string>();
         dedupMemory.set(i, seen);
-        const k = normalized ? blob.id.toLowerCase() : displayId(blob);
+        const k = blob.keyPii && masked && blob.pii ? "***" : normalized ? blob.id.toLowerCase() : displayId(blob);
         if (seen.has(k)) {
           events.push({ step: i, type: "drop", by: "dedup" });
           dropped = true;
@@ -222,14 +226,27 @@ export function simulate(level: Level, path: Cell[], placed: Map<string, Station
     if (idx("dedup") < 0) hints.push("A Dedup drops rows whose id it has already seen.");
     else if (hasUpper && (idx("normalize") < 0 || idx("normalize") > onPath.lastIndexOf("dedup")))
       hints.push('Dedup compares ids exactly: "A" ≠ "a". Normalize them BEFORE the Dedup.');
-    else if (level.blobs.some((b) => b.boxed && b.dup))
+    else if (level.blobs.some((b) => b.boxed && b.dup) && (idx("parse") < 0 || idx("parse") > onPath.lastIndexOf("dedup")))
       hints.push("Dedup can't read the id of a boxed row: Parse first.");
+    else if (level.blobs.some((b) => b.keyPii) && idx("mask") >= 0 && idx("mask") < onPath.lastIndexOf("dedup"))
+      hints.push("Some copies were masked and others not, so their ids no longer match: Parse, then Dedup, then Mask.");
   }
   if (counts.leak) {
     problems.push(`${plural(counts.leak, "row")} with personal data entered the public zone unmasked.`);
-    hints.push("Mask personal data BEFORE the pipe enters the striped public zone.");
+    const maskAt = idx("mask");
+    const zoneAt = path.findIndex((c) => inPublicZone(level, c));
+    if (maskAt >= 0 && level.blobs.some((b) => b.pii && b.boxed) && (idx("parse") < 0 || idx("parse") > maskAt))
+      hints.push("Mask can't redact inside a raw box: Parse before you Mask.");
+    else if (maskAt < 0 && zoneAt >= 0 && !path.slice(1, zoneAt).some((c) => canPlace(level, c)))
+      hints.push("This pipe enters the public zone before you could build anything: try another route.");
+    else hints.push("Mask personal data BEFORE the pipe enters the striped public zone.");
   }
-  if (deliveredOk < expected) problems.push(`${plural(expected - deliveredOk, "valid row")} never arrived.`);
+  if (deliveredOk < expected) {
+    problems.push(`${plural(expected - deliveredOk, "valid row")} never arrived.`);
+    const maskIdx = onPath.indexOf("mask");
+    if (level.blobs.some((b) => b.keyPii) && maskIdx >= 0 && onPath.lastIndexOf("dedup") > maskIdx)
+      hints.push('Mask turned the email ids into "***": the Dedup after it thinks different rows are copies. Deduplicate BEFORE masking.');
+  }
 
   const best = level.parLength ?? shortestLength(level) ?? path.length;
   return {

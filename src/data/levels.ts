@@ -7,6 +7,8 @@ const copy = (id: string, extra: Partial<BlobSpec> = {}): BlobSpec => ({ id, kin
 const upper = (id: string): BlobSpec => ({ id, kind: "ok", dup: true, upper: true });
 const box = (b: BlobSpec): BlobSpec => ({ ...b, boxed: true });
 const pii = (b: BlobSpec): BlobSpec => ({ ...b, pii: true });
+/** A row whose id is an email: personal data used as the key. */
+const email = (id: string, extra: Partial<BlobSpec> = {}): BlobSpec => ({ id, kind: "ok", pii: true, keyPii: true, ...extra });
 
 const cells = (...xy: [number, number][]): Cell[] => xy.map(([x, y]) => ({ x, y }));
 const column = (x: number, rows: number): Cell[] => Array.from({ length: rows }, (_, y) => ({ x, y }));
@@ -35,7 +37,7 @@ export const STATION_INFO: Record<StationKind, { name: string; does: string; car
   mask: {
     name: "Mask",
     does: "Hides personal data (names, emails…) — the row puts on sunglasses.",
-    careful: "Must act BEFORE the pipe enters the striped public zone.",
+    careful: "Before the public zone — and it can't redact inside a raw box.",
   },
 };
 
@@ -204,6 +206,48 @@ export const LEVELS: Level[] = [
       pii(ok("d")),
     ],
   },
+  {
+    id: "black-friday",
+    title: "10 · BOSS — Black Friday",
+    brief: "Every trap at once, three roads, not one centimetre of spare pipe. Here the ids are EMAILS…",
+    boss: true,
+    lesson: {
+      title: "Order of operations — and why it matters",
+      text: "Parse → validate → normalize → deduplicate → protect. When the key itself is personal data, deduplicate (or hash consistently) BEFORE masking, or you lose rows. You just beat the boss: that's real data engineering.",
+    },
+    cols: 10, rows: 6,
+    source: { x: 0, y: 0 }, sink: { x: 9, y: 5 },
+    walls: [
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((x) => ({ x, y: 1 })),
+      ...[1, 2, 3, 4, 5, 6, 7].flatMap((x) => cells([x, 3], [x, 4])),
+      ...cells([9, 2]).filter(() => false),
+    ],
+    publicZone: cells([2, 2], [9, 3], [9, 4], [8, 3], [8, 4], [7, 5], [8, 5]),
+    fixed: [
+      { cell: { x: 2, y: 0 }, kind: "mask" },
+      { cell: { x: 0, y: 2 }, kind: "filter" },
+    ],
+    pads: cells([1, 0], [4, 0], [5, 0], [7, 0], [1, 2], [4, 2], [5, 2], [6, 2], [0, 3], [1, 5], [3, 5], [4, 5], [6, 5]),
+    maxPipe: 15,
+    parLength: 15,
+    inventory: { parse: 1, filter: 1, normalize: 1, dedup: 1, mask: 1 },
+    blobs: [
+      box(ok("a")),
+      email("ana"),
+      box(nul("n1")),
+      ok("c"),
+      upper("a"),
+      email("bob"),
+      box(email("ana", { dup: true })),
+      nul("n2"),
+      box(upper("c")),
+      email("cid"),
+      email("bob", { dup: true }),
+      box(ok("d")),
+      box(nul("n3")),
+      ok("e"),
+    ],
+  },
 ];
 
 export interface Layout {
@@ -230,6 +274,30 @@ export const SOLUTIONS: Record<string, StationKind[] | Layout> = {
   "two-roads": {
     path: [[0, 2], [1, 2], [1, 3], [1, 4], [2, 4], [3, 4], [4, 4], [5, 4], [6, 4], [7, 4], [7, 3], [7, 2], [8, 2]],
     stations: [[[1, 2], "parse"], [[2, 4], "filter"], [[3, 4], "normalize"], [[4, 4], "dedup"], [[5, 4], "mask"]],
+  },
+  "black-friday": {
+    path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
+    stations: [[[0, 3], "parse"], [[1, 5], "filter"], [[3, 5], "normalize"], [[4, 5], "dedup"], [[6, 5], "mask"]],
+  },
+};
+
+/** Tempting wrong layouts for the boss: each must fail with a hint. */
+export const BOSS_TRAPS: Record<string, Layout> = {
+  "top road (bolted Mask comes too early)": {
+    path: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0], [9, 0], [9, 1], [9, 2], [9, 3], [9, 4], [9, 5]],
+    stations: [[[1, 0], "parse"], [[4, 0], "filter"], [[5, 0], "normalize"], [[7, 0], "dedup"]],
+  },
+  "middle road (public zone before any pad)": {
+    path: [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2], [8, 3], [8, 4], [8, 5], [9, 5]],
+    stations: [[[1, 2], "parse"], [[4, 2], "filter"], [[5, 2], "normalize"], [[6, 2], "dedup"]],
+  },
+  "bottom road, Mask before Dedup": {
+    path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
+    stations: [[[0, 3], "parse"], [[1, 5], "filter"], [[3, 5], "normalize"], [[4, 5], "mask"], [[6, 5], "dedup"]],
+  },
+  "bottom road, Mask before Parse": {
+    path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
+    stations: [[[0, 3], "mask"], [[1, 5], "parse"], [[3, 5], "filter"], [[4, 5], "normalize"], [[6, 5], "dedup"]],
   },
 };
 

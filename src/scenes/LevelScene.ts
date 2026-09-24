@@ -28,6 +28,8 @@ const LOOK: Record<StationKind, { tex: string; color: number; dark: number }> = 
   mask: { tex: "st-mask", color: C.mask, dark: C.maskDark },
 };
 
+const tagOf = (b: BlobSpec): string => (b.kind === "null" ? "∅" : b.keyPii ? `${displayId(b)}@` : displayId(b));
+
 interface BlobView {
   c: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Image;
@@ -81,13 +83,19 @@ export class LevelScene extends Phaser.Scene {
   create(): void {
     background(this);
     const L = this.level;
+    if (L.boss) {
+      // red alert ambience: a pulsing vignette
+      const v = this.add.graphics().setDepth(-5);
+      for (let i = 0; i < 6; i++) v.lineStyle(26, 0xff5d73, 0.05 + i * 0.012).strokeRect(i * 13, i * 13, W - i * 26, H - i * 26);
+      this.tweens.add({ targets: v, alpha: 0.35, duration: 900, yoyo: true, repeat: -1 });
+    }
     this.cell = Math.min(80, Math.floor(880 / L.cols), Math.floor(340 / L.rows));
     this.ox = Math.round(W / 2 - (L.cols * this.cell) / 2);
     this.oy = Math.round(352 - (L.rows * this.cell) / 2);
 
     // ---- header
     button(this, 50, 42, "←", C.pipe, 0x3d5ad6, () => this.scene.start("menu"), 58, 48);
-    text(this, 96, 30, L.title, 28, C.inkHex, "700").setOrigin(0, 0.5);
+    text(this, 96, 30, L.title, 28, L.boss ? "#ff5d73" : C.inkHex, "700").setOrigin(0, 0.5);
     this.hint = text(this, 96, 62, L.brief, 17, C.mutedHex, "500").setOrigin(0, 0.5);
     this.incoming(L.blobs);
     if (L.maxPipe) this.budget = text(this, W - 24, 30, "", 18, C.inkHex, "700").setOrigin(1, 0.5);
@@ -136,7 +144,8 @@ export class LevelScene extends Phaser.Scene {
 
     this.redraw();
     this.cameras.main.fadeIn(250, 255, 244, 230);
-    if (L.introduces?.length) this.introduce(L.introduces);
+    if (L.boss) this.bossIntro();
+    else if (L.introduces?.length) this.introduce(L.introduces);
   }
 
   // ------------------------------------------------------------ board
@@ -358,6 +367,41 @@ export class LevelScene extends Phaser.Scene {
     this.info = undefined;
   }
 
+  private bossIntro(): void {
+    const dim = this.add.graphics().fillStyle(0x221a30, 0.6).fillRect(0, 0, W, H);
+    const cw = 640;
+    const ch = 470;
+    const card = this.add.graphics();
+    card.fillStyle(0xd94f73, 1).fillRoundedRect(-cw / 2, -ch / 2 + 8, cw, ch, 28);
+    card.fillStyle(0xffffff, 1).fillRoundedRect(-cw / 2, -ch / 2, cw, ch, 28);
+    card.fillStyle(0xff5d73, 1).fillRoundedRect(-cw / 2, -ch / 2, cw, 74, { tl: 28, tr: 28, bl: 0, br: 0 });
+    const items: Phaser.GameObjects.GameObject[] = [card, text(this, 0, -ch / 2 + 38, "⚠  BOSS LEVEL  ⚠", 32, "#ffffff", "700")];
+    items.push(text(this, 0, -ch / 2 + 104, "Everything you learned, all at once. Remember:", 17, C.mutedHex, "600"));
+    const rules: [StationKind, string][] = [
+      ["parse", "Parse first — nobody can read inside a box."],
+      ["filter", "Filter the empty rows (after Parse)."],
+      ["normalize", 'Normalize before Dedup ("A" = "a").'],
+      ["dedup", "Dedup on the id…"],
+      ["mask", "…and Mask before the public zone."],
+    ];
+    rules.forEach(([k, r], i) => {
+      const y = -ch / 2 + 146 + i * 40;
+      items.push(this.add.image(-cw / 2 + 60, y, LOOK[k].tex).setScale(0.5));
+      items.push(text(this, -cw / 2 + 92, y, r, 17, C.inkHex, "500").setOrigin(0, 0.5));
+    });
+    items.push(
+      text(this, 0, ch / 2 - 104, "NEW TWIST: here the ids are EMAILS (personal data!).\nWhat does Mask do to an id… and what does Dedup need?", 16, "#c93c90", "700").setWordWrapWidth(cw - 60),
+    );
+    const box = this.add.container(W / 2, H / 2, items).setScale(0.7).setAlpha(0);
+    this.overlay = this.add.container(0, 0, [dim, box]).setDepth(60);
+    box.add(button(this, 0, ch / 2 - 40, "Bring it on!", 0xff5d73, 0xd94f73, () => {
+      this.overlay?.destroy();
+      this.overlay = undefined;
+    }, 210, 52));
+    this.tweens.add({ targets: box, scale: 1, alpha: 1, duration: 420, ease: "Back.out" });
+    this.cameras.main.shake(250, 0.006);
+  }
+
   private introduce(kinds: StationKind[]): void {
     const dim = this.add.graphics().fillStyle(0x3a2e4f, 0.45).fillRect(0, 0, W, H);
     const t = kinds[0];
@@ -406,7 +450,7 @@ export class LevelScene extends Phaser.Scene {
     let ok = 0;
     let bad = 0;
     result.runs.forEach((run, i) => {
-      this.time.delayedCall(i * 560, () =>
+      this.time.delayedCall(i * (this.level.boss ? 430 : 560), () =>
         this.animate(run, step, (verdict) => {
           if (verdict === "ok") ok++;
           else if (verdict) bad++;
@@ -421,7 +465,7 @@ export class LevelScene extends Phaser.Scene {
   private makeBlob(spec: BlobSpec, x: number, y: number): BlobView {
     const scale = this.cell / 88;
     const body = this.add.image(0, 0, spec.kind === "null" ? "blob-null" : "blob-ok").setScale(scale);
-    const tag = text(this, 0, 22 * scale + 6, spec.kind === "null" ? "∅" : displayId(spec), 13, "#ffffff", "700");
+    const tag = text(this, 0, 22 * scale + 6, tagOf(spec), 13, "#ffffff", "700");
     tag.setStroke("#3a2e4f", 4);
     const parts: Phaser.GameObjects.GameObject[] = [body, tag];
     const view: BlobView = { c: this.add.container(x, y), body, tag };
@@ -468,6 +512,7 @@ export class LevelScene extends Phaser.Scene {
           break;
         case "mask": {
           v.badge?.destroy();
+          if (run.blob.keyPii) v.tag.setText("***");
           const shades = this.add.image(0, -40, "shades").setScale(this.cell / 110);
           v.c.add(shades);
           this.tweens.add({ targets: shades, y: -2 * (this.cell / 88), duration: 220, ease: "Bounce.out" });
@@ -531,7 +576,7 @@ export class LevelScene extends Phaser.Scene {
     const top = -ch / 2;
 
     if (result.success) {
-      items.push(text(this, 0, top + 50, "Pipeline delivered!", 34, "#2fbf71", "700"));
+      items.push(text(this, 0, top + 50, this.level.boss ? "🏆 BOSS DEFEATED! 🏆" : "Pipeline delivered!", 34, this.level.boss ? "#ff5d73" : "#2fbf71", "700"));
       for (let s = 0; s < 3; s++) {
         const star = this.add.image(-90 + s * 90, top + 122, "star").setScale(0).setTint(s < stars ? C.star : C.starEmpty);
         items.push(star);
@@ -571,6 +616,15 @@ export class LevelScene extends Phaser.Scene {
     if (result.success) {
       this.sparks.setParticleTint(C.star);
       this.sparks.explode(40, W / 2, H / 2 - 120);
+      if (this.level.boss) {
+        const colors = [C.ok, C.filter, C.dedup, C.parse, C.normalize, C.star];
+        for (let i = 0; i < 8; i++) {
+          this.time.delayedCall(200 + i * 260, () => {
+            this.sparks.setParticleTint(colors[i % colors.length]);
+            this.sparks.explode(36, Phaser.Math.Between(120, W - 120), Phaser.Math.Between(80, 300));
+          });
+        }
+      }
     }
   }
 
@@ -589,9 +643,9 @@ export class LevelScene extends Phaser.Scene {
       this.add.image(x, y, b.kind === "null" ? "blob-null" : "blob-ok").setScale(0.42);
       if (b.boxed) this.add.image(x, y + 1, "box").setScale(0.42);
       if (b.pii) this.add.graphics().fillStyle(C.piiBadge, 1).fillRoundedRect(x + 3, y - 12, 9, 7, 2);
-      const t = text(this, x, y + 15, b.kind === "null" ? "∅" : displayId(b), 10, "#3a2e4f", "700");
+      const t = text(this, x, y + 15, tagOf(b), 10, "#3a2e4f", "700");
       t.setAlpha(0.8);
-      x += 28;
+      x += blobs.some((bb) => bb.keyPii) ? 34 : 28;
     }
     // legend for the special kinds present in this level
     const legend: string[] = [];
@@ -599,6 +653,7 @@ export class LevelScene extends Phaser.Scene {
     if (blobs.some((b) => b.boxed)) legend.push("📦 = raw, unparsed");
     if (blobs.some((b) => b.upper)) legend.push("A/a = same id, different case");
     if (blobs.some((b) => b.pii)) legend.push("🪪 = personal data");
+    if (blobs.some((b) => b.keyPii)) legend.push("x@ = the id is an email");
     if (legend.length) text(this, 96, y + 30, legend.join("    ·    "), 13, C.mutedHex, "500").setOrigin(0, 0.5);
   }
 
