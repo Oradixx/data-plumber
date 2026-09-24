@@ -133,4 +133,21 @@ export const save = {
       /* ignore */
     }
   },
+  best(game: string): number {
+    try {
+      return Number(localStorage.getItem(`dp.best.${game}`) ?? 0) || 0;
+    } catch {
+      return 0;
+    }
+  },
+  /** Stores the score if it beats the best one; returns true for a new record. */
+  setBest(game: string, score: number): boolean {
+    if (score <= save.best(game)) return false;
+    try {
+      localStorage.setItem(`dp.best.${game}`, String(score));
+    } catch {
+      /* ignore */
+    }
+    return true;
+  },
 };

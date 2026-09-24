@@ -27,6 +27,14 @@ export interface BlobSpec {
 
 export type StationKind = "parse" | "filter" | "normalize" | "dedup" | "mask";
 
+export type Dir = "up" | "down" | "left" | "right";
+export const DIRS: Record<Dir, Cell> = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
+
+/** A build pad. `only` restricts it to one station type. */
+export interface Pad extends Cell {
+  only?: StationKind;
+}
+
 export interface FixedStation {
   cell: Cell;
   kind: StationKind;
@@ -38,7 +46,7 @@ export interface Level {
   brief: string;
   lesson: { title: string; text: string };
   introduces?: StationKind[]; // stations presented in a pop-up at level start
-  boss?: boolean;
+  boss?: "mini" | "final";
   cols: number;
   rows: number;
   source: Cell;
@@ -48,7 +56,8 @@ export interface Level {
   fixed?: FixedStation[];
   inventory: Partial<Record<StationKind, number>>;
   maxPipe?: number; // max number of cells in the pipe (source and sink included)
-  pads?: Cell[]; // if set, stations can only be built on these cells
+  pads?: Pad[]; // if set, stations can only be built on these cells
+  arrows?: { cell: Cell; dir: Dir }[]; // one-way conveyors: must be crossed in that direction
   parLength?: number; // pipe length for the 2nd star when the shortest path isn't a valid solution
   blobs: BlobSpec[];
 }
@@ -68,9 +77,29 @@ export function fixedAt(level: Level, c: Cell): StationKind | undefined {
 }
 
 /** Where can the player build a station? (on the pipe, not on a fixed station, on a pad if pads exist) */
-export function canPlace(level: Level, c: Cell): boolean {
+export function canPlace(level: Level, c: Cell, kind?: StationKind): boolean {
   if (same(c, level.source) || same(c, level.sink) || fixedAt(level, c)) return false;
-  return level.pads ? level.pads.some((p) => same(p, c)) : true;
+  if (!level.pads) return true;
+  const pad = level.pads.find((p) => same(p, c));
+  return !!pad && (!pad.only || !kind || pad.only === kind);
+}
+
+export function padAt(level: Level, c: Cell): Pad | undefined {
+  return level.pads?.find((p) => same(p, c));
+}
+
+export function arrowAt(level: Level, c: Cell): Dir | undefined {
+  return level.arrows?.find((a) => same(a.cell, c))?.dir;
+}
+
+/** One-way conveyors: leave an arrow cell in its direction, enter it from behind. */
+export function stepOk(level: Level, from: Cell, to: Cell): boolean {
+  const d = { x: to.x - from.x, y: to.y - from.y };
+  const out = arrowAt(level, from);
+  if (out && (DIRS[out].x !== d.x || DIRS[out].y !== d.y)) return false;
+  const inn = arrowAt(level, to);
+  if (inn && (DIRS[inn].x !== d.x || DIRS[inn].y !== d.y)) return false;
+  return true;
 }
 
 export function inPublicZone(level: Level, c: Cell): boolean {
@@ -83,6 +112,7 @@ export function canExtend(level: Level, path: Cell[], next: Cell): boolean {
   if (!last || same(last, level.sink)) return false;
   if (level.maxPipe && path.length >= level.maxPipe) return false;
   if (!adjacent(last, next) || !isWalkable(level, next) || same(next, level.source)) return false;
+  if (!stepOk(level, last, next)) return false;
   return !path.some((c) => same(c, next));
 }
 
@@ -93,7 +123,7 @@ export function isComplete(level: Level, path: Cell[]): boolean {
   return path.every((c, i) => {
     if (seen.has(key(c)) || !isWalkable(level, c)) return false;
     seen.add(key(c));
-    return i === 0 || adjacent(path[i - 1], c);
+    return i === 0 || (adjacent(path[i - 1], c) && stepOk(level, path[i - 1], c));
   });
 }
 
@@ -107,7 +137,7 @@ export function shortestLength(level: Level): number | null {
     if (same(cur, level.sink)) return d;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const n = { x: cur.x + dx, y: cur.y + dy };
-      if (!dist.has(key(n)) && isWalkable(level, n) && !same(n, level.source)) {
+      if (!dist.has(key(n)) && isWalkable(level, n) && !same(n, level.source) && stepOk(level, cur, n)) {
         dist.set(key(n), d + 1);
         queue.push(n);
       }
@@ -207,6 +237,12 @@ export function simulate(level: Level, path: Cell[], placed: Map<string, Station
   const problems: string[] = [];
   const hints: string[] = [];
   const idx = (k: StationKind) => onPath.indexOf(k);
+  // With typed pads, a route can make a station impossible to build at all.
+  const inner = path.slice(1, -1);
+  const routeLacks = (k: StationKind) =>
+    !!level.pads?.some((pd) => pd.only) && idx(k) < 0 && !inner.some((c) => canPlace(level, c, k));
+  const skipped = (k: StationKind) =>
+    `This route never crosses a ${k[0].toUpperCase() + k.slice(1)} pad — you can't build one here. Find another road.`;
   const plural = (n: number, w: string) => `${n} ${w}${n > 1 ? "s" : ""}`;
 
   if (counts.boxed) {
@@ -216,14 +252,16 @@ export function simulate(level: Level, path: Cell[], placed: Map<string, Station
   if (counts.null) {
     problems.push(`${plural(counts.null, "empty (NULL) row")} got through.`);
     const boxedNull = level.blobs.some((b) => b.boxed && b.kind === "null");
-    if (idx("filter") < 0) hints.push("A Filter removes empty rows.");
+    if (routeLacks("filter")) hints.push(skipped("filter"));
+    else if (idx("filter") < 0) hints.push("A Filter removes empty rows.");
     else if (boxedNull && (idx("parse") < 0 || idx("parse") > idx("filter")))
       hints.push("A Filter can't see inside a box: Parse must come BEFORE the Filter.");
   }
   if (counts.duplicate) {
     problems.push(`${plural(counts.duplicate, "duplicate")} landed in the warehouse.`);
     const hasUpper = level.blobs.some((b) => b.upper);
-    if (idx("dedup") < 0) hints.push("A Dedup drops rows whose id it has already seen.");
+    if (routeLacks("dedup")) hints.push(skipped("dedup"));
+    else if (idx("dedup") < 0) hints.push("A Dedup drops rows whose id it has already seen.");
     else if (hasUpper && (idx("normalize") < 0 || idx("normalize") > onPath.lastIndexOf("dedup")))
       hints.push('Dedup compares ids exactly: "A" ≠ "a". Normalize them BEFORE the Dedup.');
     else if (level.blobs.some((b) => b.boxed && b.dup) && (idx("parse") < 0 || idx("parse") > onPath.lastIndexOf("dedup")))

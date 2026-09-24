@@ -16,6 +16,7 @@ import {
 } from "../src/core/sim.ts";
 import { BOSS_TRAPS, LEVELS, SOLUTIONS, TRAPS, type Layout } from "../src/data/levels.ts";
 import { canPlace } from "../src/core/sim.ts";
+import { analyse } from "../src/core/solver.ts";
 
 /** Shortest source→sink pipe by breadth-first search. */
 function shortestPath(level: Level): Cell[] {
@@ -157,18 +158,58 @@ test("stars: first-try bonus and short-pipe bonus", () => {
   assert.equal(starsFor(r, 2), 2);
 });
 
-for (const [name, layout] of Object.entries(BOSS_TRAPS)) {
-  test(`boss trap fails with a hint: ${name}`, () => {
-    const level = LEVELS.find((l) => l.id === "black-friday")!;
-    const path = layout.path.map(([x, y]) => ({ x, y }));
-    assert.ok(isComplete(level, path), "trap pipe should be a legal pipe");
-    const placed = new Map<string, StationKind>(layout.stations.map(([[x, y], k]) => [key({ x, y }), k]));
-    for (const k of placed.keys()) {
-      const [x, y] = k.split(",").map(Number);
-      assert.ok(canPlace(level, { x, y }), `trap uses a non-pad cell ${k}`);
-    }
-    const r = simulate(level, path, placed);
-    assert.equal(r.success, false);
-    assert.ok(r.hints.length > 0, r.problems.join(" "));
-  });
+for (const [levelId, traps] of Object.entries(BOSS_TRAPS)) {
+  for (const [name, layout] of Object.entries(traps)) {
+    test(`${levelId}: boss trap fails with a hint: ${name}`, () => {
+      const level = LEVELS.find((l) => l.id === levelId)!;
+      const path = layout.path.map(([x, y]) => ({ x, y }));
+      assert.ok(isComplete(level, path), "trap pipe should be a legal pipe");
+      const placed = new Map<string, StationKind>(layout.stations.map(([[x, y], k]) => [key({ x, y }), k]));
+      for (const [k, kind] of placed) {
+        const [x, y] = k.split(",").map(Number);
+        assert.ok(canPlace(level, { x, y }, kind), `trap uses a non-pad cell ${k}`);
+      }
+      const r = simulate(level, path, placed);
+      assert.equal(r.success, false);
+      assert.ok(r.hints.length > 0, r.problems.join(" "));
+    });
+  }
 }
+
+test("final boss: the bolted-Mask shortcut explains that the route has no Filter pad", () => {
+  const level = LEVELS.find((l) => l.id === "year-end-close")!;
+  const layout = BOSS_TRAPS["year-end-close"]["shortcut through the bolted Mask"];
+  const placed = new Map<string, StationKind>(layout.stations.map(([[x, y], k]) => [key({ x, y }), k]));
+  const r = simulate(level, layout.path.map(([x, y]) => ({ x, y })), placed);
+  assert.match(r.hints.join(" "), /never crosses a Filter pad/);
+});
+
+test("typed pads only accept their own station", () => {
+  const level = LEVELS.find((l) => l.id === "year-end-close")!;
+  assert.equal(canPlace(level, { x: 3, y: 1 }, "parse"), true);
+  assert.equal(canPlace(level, { x: 3, y: 1 }, "mask"), false);
+});
+
+test("conveyors are one-way", () => {
+  const level = LEVELS.find((l) => l.id === "year-end-close")!;
+  // (7,1) pushes down: you can leave it downwards, never enter it going up
+  assert.equal(canExtend(level, [{ x: 7, y: 2 }], { x: 7, y: 1 }), false);
+  assert.equal(canExtend(level, [{ x: 6, y: 1 }, { x: 7, y: 1 }], { x: 7, y: 2 }), true);
+});
+
+test("final boss: exactly one winning pipe out of hundreds, and random play basically never wins", () => {
+  const level = LEVELS.find((l) => l.id === "year-end-close")!;
+  const a = analyse(level, 4000);
+  assert.ok(a.totalPaths > 300, `only ${a.totalPaths} pipes`);
+  assert.equal(a.winningPaths, 1);
+  assert.equal(a.winningLayouts, 1);
+  assert.ok(a.shortestAny! < a.shortestWin!, "the shortest pipe must be a trap");
+  assert.ok(a.randomWinRate < 0.005);
+});
+
+test("the final boss is harder than the mini-boss", () => {
+  const mini = analyse(LEVELS.find((l) => l.id === "black-friday")!, 500);
+  const final = analyse(LEVELS.find((l) => l.id === "year-end-close")!, 500);
+  assert.ok(mini.winningPaths >= 1);
+  assert.ok(final.totalPaths > mini.totalPaths * 10);
+});

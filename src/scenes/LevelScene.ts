@@ -1,7 +1,12 @@
 import Phaser from "phaser";
 import {
+  adjacent,
+  arrowAt,
   canExtend,
   canPlace,
+  isWalkable,
+  padAt,
+  stepOk,
   displayId,
   fixedAt,
   inPublicZone,
@@ -13,6 +18,7 @@ import {
   type BlobRun,
   type BlobSpec,
   type Cell,
+  type Dir,
   type Level,
   type Result,
   type StationKind,
@@ -84,10 +90,17 @@ export class LevelScene extends Phaser.Scene {
     background(this);
     const L = this.level;
     if (L.boss) {
-      // red alert ambience: a pulsing vignette
-      const v = this.add.graphics().setDepth(-5);
-      for (let i = 0; i < 6; i++) v.lineStyle(26, 0xff5d73, 0.05 + i * 0.012).strokeRect(i * 13, i * 13, W - i * 26, H - i * 26);
-      this.tweens.add({ targets: v, alpha: 0.35, duration: 900, yoyo: true, repeat: -1 });
+      // red alert ambience: a pulsing vignette (the final boss adds a slower purple one)
+      const vignette = (color: number, alpha: number, duration: number) => {
+        const v = this.add.graphics().setDepth(-5);
+        for (let i = 0; i < 6; i++) v.lineStyle(26, color, alpha + i * 0.012).strokeRect(i * 13, i * 13, W - i * 26, H - i * 26);
+        this.tweens.add({ targets: v, alpha: 0.2, duration, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+      };
+      vignette(0xff5d73, 0.05, 900);
+      if (L.boss === "final") {
+        vignette(0x7a58e6, 0.07, 1700);
+        this.cameras.main.setBackgroundColor(0xfbeff0);
+      }
     }
     this.cell = Math.min(80, Math.floor(880 / L.cols), Math.floor(340 / L.rows));
     this.ox = Math.round(W / 2 - (L.cols * this.cell) / 2);
@@ -182,20 +195,47 @@ export class LevelScene extends Phaser.Scene {
         }
       }
     }
-    if (L.publicZone?.length) {
-      const top = L.publicZone.reduce((a, c) => (c.y < a.y || (c.y === a.y && c.x < a.x) ? c : a));
-      const p = this.center(top);
-      const lbl = text(this, p.x + (L.publicZone.some((c) => c.x === top.x + 1) ? this.cell / 2 : 0), this.oy - 12, "PUBLIC ZONE", 13, "#ff5d73", "700");
-      lbl.setDepth(6);
+    // "PUBLIC ZONE" label above the board, only when the zone touches the top row (else: legend)
+    const topZone = (L.publicZone ?? []).filter((c) => c.y === 0 && !same(c, L.sink)).sort((a, b) => a.x - b.x)[0];
+    if (topZone) {
+      const p = this.center(topZone);
+      const wide = L.publicZone!.some((c) => c.y === 0 && c.x === topZone.x + 1 && !same(c, L.sink));
+      text(this, p.x + (wide ? this.cell / 2 : 0), this.oy - 12, "PUBLIC ZONE", 13, "#ff5d73", "700").setDepth(6);
     }
     for (const c of L.pads ?? []) {
       const p = this.center(c);
       this.add.image(p.x, p.y, "pad").setScale((this.cell * 0.78) / 64).setDepth(0.5).setAlpha(0.95);
+      // a typed pad shows the only station it accepts, as a ghost
+      if (c.only) this.add.image(p.x, p.y, LOOK[c.only].tex).setScale((this.cell * 0.5) / 64).setDepth(0.6).setAlpha(0.45);
     }
+    for (const a of L.arrows ?? []) this.conveyor(a.cell, a.dir);
     for (const w of L.walls) {
       const c = this.center(w);
       this.add.image(c.x, c.y, "crate").setScale((this.cell * 0.85) / 64).setDepth(2);
     }
+  }
+
+  /** One-way conveyor tile: a belt with chevrons that keep sliding in its direction. */
+  private conveyor(c: Cell, dir: Dir): void {
+    const p = this.center(c);
+    const s = this.cell - 10;
+    const belt = this.add.graphics().setDepth(0.4);
+    belt.fillStyle(0xdfe5ff, 1).fillRoundedRect(p.x - s / 2, p.y - s / 2, s, s, 10);
+    belt.lineStyle(2, 0xb9c4f5, 1).strokeRoundedRect(p.x - s / 2, p.y - s / 2, s, s, 10);
+    const angle = { right: 0, down: 90, left: 180, up: 270 }[dir];
+    const chev = this.add.graphics();
+    const u = this.cell / 10;
+    for (const off of [-1.6 * u, 0.6 * u]) {
+      chev.lineStyle(u * 0.7, C.pipe, 0.9);
+      chev.beginPath();
+      chev.moveTo(off - u, -1.3 * u);
+      chev.lineTo(off + 0.4 * u, 0);
+      chev.lineTo(off - u, 1.3 * u);
+      chev.strokePath();
+    }
+    const holder = this.add.container(p.x, p.y, [chev]).setAngle(angle).setDepth(0.45);
+    this.tweens.add({ targets: chev, x: u * 1.2, alpha: { from: 1, to: 0.35 }, duration: 520, repeat: -1 });
+    void holder;
   }
 
   private redraw(): void {
@@ -260,6 +300,8 @@ export class LevelScene extends Phaser.Scene {
       this.showInfo(st, !!fixedAt(this.level, c));
     } else if (this.level.maxPipe && this.path.length >= this.level.maxPipe) {
       this.nudge("Out of pipe! Go back (drag backwards) or Clear, and find a shorter route.");
+    } else if (adjacent(last, c) && isWalkable(this.level, c) && !stepOk(this.level, last, c)) {
+      this.nudge("Conveyors only go one way: follow the arrows, never against them.");
     } else {
       this.nudge("Start from the API, then drag cell by cell.");
     }
@@ -278,6 +320,10 @@ export class LevelScene extends Phaser.Scene {
     } else if (canExtend(this.level, this.path, c)) {
       this.extend(c);
       this.redraw();
+    } else {
+      const last = this.path[n - 1];
+      if (adjacent(last, c) && isWalkable(this.level, c) && !stepOk(this.level, last, c) && (arrowAt(this.level, c) || arrowAt(this.level, last)))
+        this.nudge("Conveyors only go one way: follow the arrows, never against them.");
     }
   }
 
@@ -316,6 +362,8 @@ export class LevelScene extends Phaser.Scene {
     if (!onPipe || !canPlace(this.level, c)) {
       return this.nudge(this.level.pads ? "Stations can only be built on yellow pads that the pipe goes through." : "Stations go on the pipe — draw it first.");
     }
+    const only = padAt(this.level, c)?.only;
+    if (only && only !== this.tool) return this.nudge(`This pad only takes a ${STATION_INFO[only].name} (look at the ghost icon).`);
     const existing = this.sprites.get(k);
     if (existing && this.placed.get(k) === this.tool) {
       this.removeStation(k);
@@ -368,38 +416,64 @@ export class LevelScene extends Phaser.Scene {
   }
 
   private bossIntro(): void {
-    const dim = this.add.graphics().fillStyle(0x221a30, 0.6).fillRect(0, 0, W, H);
-    const cw = 640;
-    const ch = 470;
+    const final = this.level.boss === "final";
+    const dim = this.add.graphics().fillStyle(0x221a30, final ? 0.75 : 0.6).fillRect(0, 0, W, H);
+    const cw = 660;
+    const ch = 480;
+    const top = final ? 0x7a58e6 : 0xff5d73;
+    const base = final ? 0x5a3cc0 : 0xd94f73;
     const card = this.add.graphics();
-    card.fillStyle(0xd94f73, 1).fillRoundedRect(-cw / 2, -ch / 2 + 8, cw, ch, 28);
+    card.fillStyle(base, 1).fillRoundedRect(-cw / 2, -ch / 2 + 8, cw, ch, 28);
     card.fillStyle(0xffffff, 1).fillRoundedRect(-cw / 2, -ch / 2, cw, ch, 28);
-    card.fillStyle(0xff5d73, 1).fillRoundedRect(-cw / 2, -ch / 2, cw, 74, { tl: 28, tr: 28, bl: 0, br: 0 });
-    const items: Phaser.GameObjects.GameObject[] = [card, text(this, 0, -ch / 2 + 38, "⚠  BOSS LEVEL  ⚠", 32, "#ffffff", "700")];
-    items.push(text(this, 0, -ch / 2 + 104, "Everything you learned, all at once. Remember:", 17, C.mutedHex, "600"));
-    const rules: [StationKind, string][] = [
-      ["parse", "Parse first — nobody can read inside a box."],
-      ["filter", "Filter the empty rows (after Parse)."],
-      ["normalize", 'Normalize before Dedup ("A" = "a").'],
-      ["dedup", "Dedup on the id…"],
-      ["mask", "…and Mask before the public zone."],
-    ];
-    rules.forEach(([k, r], i) => {
-      const y = -ch / 2 + 146 + i * 40;
-      items.push(this.add.image(-cw / 2 + 60, y, LOOK[k].tex).setScale(0.5));
+    card.fillStyle(top, 1).fillRoundedRect(-cw / 2, -ch / 2, cw, 74, { tl: 28, tr: 28, bl: 0, br: 0 });
+    const heading = final ? "☠  FINAL BOSS  ☠" : "⚠  MINI-BOSS  ⚠";
+    const items: Phaser.GameObjects.GameObject[] = [card, text(this, 0, -ch / 2 + 38, heading, 32, "#ffffff", "700")];
+    items.push(
+      text(this, 0, -ch / 2 + 104, final ? "Everything you know, plus three new rules:" : "Everything you learned, all at once. Remember:", 17, C.mutedHex, "600"),
+    );
+    // each rule: an icon (texture key) and a sentence
+    const rules: [string, string][] = final
+      ? [
+          ["sink", "The warehouse is PUBLIC: every email must be masked on arrival."],
+          ["pad", "Each pad takes ONE station type — the ghost icon on it."],
+          ["conveyor", "Blue conveyors only go one way."],
+          ["lock", "A legacy Mask is bolted in. Friend… or trap?"],
+          ["st-dedup", "Emails again: Dedup must still see them unmasked."],
+        ]
+      : [
+          ["st-parse", "Parse first — nobody can read inside a box."],
+          ["st-filter", "Filter the empty rows (after Parse)."],
+          ["st-normalize", 'Normalize before Dedup ("A" = "a").'],
+          ["st-dedup", "Dedup on the id…"],
+          ["st-mask", "…and Mask before the public zone."],
+        ];
+    rules.forEach(([icon, r], i) => {
+      const y = -ch / 2 + 146 + i * 42;
+      if (icon === "conveyor") items.push(text(this, -cw / 2 + 60, y, "➜", 28, hex(C.pipe), "700"));
+      else items.push(this.add.image(-cw / 2 + 60, y, icon).setScale(icon === "lock" ? 1.1 : icon === "sink" || icon === "pad" ? 0.5 : 0.5));
       items.push(text(this, -cw / 2 + 92, y, r, 17, C.inkHex, "500").setOrigin(0, 0.5));
     });
     items.push(
-      text(this, 0, ch / 2 - 104, "NEW TWIST: here the ids are EMAILS (personal data!).\nWhat does Mask do to an id… and what does Dedup need?", 16, "#c93c90", "700").setWordWrapWidth(cw - 60),
+      text(
+        this,
+        0,
+        ch / 2 - 106,
+        final
+          ? `${this.level.maxPipe} cells of pipe, hundreds of possible routes — exactly ONE works.\nTip from the pros: plan backwards from the warehouse.`
+          : "NEW TWIST: here the ids are EMAILS (personal data!).\nWhat does Mask do to an id… and what does Dedup need?",
+        16,
+        final ? "#5a3cc0" : "#c93c90",
+        "700",
+      ).setWordWrapWidth(cw - 60),
     );
     const box = this.add.container(W / 2, H / 2, items).setScale(0.7).setAlpha(0);
     this.overlay = this.add.container(0, 0, [dim, box]).setDepth(60);
-    box.add(button(this, 0, ch / 2 - 40, "Bring it on!", 0xff5d73, 0xd94f73, () => {
+    box.add(button(this, 0, ch / 2 - 40, final ? "I'm ready." : "Bring it on!", top, base, () => {
       this.overlay?.destroy();
       this.overlay = undefined;
     }, 210, 52));
     this.tweens.add({ targets: box, scale: 1, alpha: 1, duration: 420, ease: "Back.out" });
-    this.cameras.main.shake(250, 0.006);
+    this.cameras.main.shake(final ? 450 : 250, final ? 0.01 : 0.006);
   }
 
   private introduce(kinds: StationKind[]): void {
@@ -576,7 +650,9 @@ export class LevelScene extends Phaser.Scene {
     const top = -ch / 2;
 
     if (result.success) {
-      items.push(text(this, 0, top + 50, this.level.boss ? "🏆 BOSS DEFEATED! 🏆" : "Pipeline delivered!", 34, this.level.boss ? "#ff5d73" : "#2fbf71", "700"));
+      const final = this.level.boss === "final";
+      const headline = final ? "🏆 CAMPAIGN COMPLETE! 🏆" : this.level.boss ? "👑 MINI-BOSS DEFEATED!" : "Pipeline delivered!";
+      items.push(text(this, 0, top + 50, headline, 34, final ? "#7a58e6" : this.level.boss ? "#ff5d73" : "#2fbf71", "700"));
       for (let s = 0; s < 3; s++) {
         const star = this.add.image(-90 + s * 90, top + 122, "star").setScale(0).setTint(s < stars ? C.star : C.starEmpty);
         items.push(star);
@@ -590,11 +666,12 @@ export class LevelScene extends Phaser.Scene {
       items.push(kc, text(this, 0, top + 230, `💡 ${this.level.lesson.title}`, 19, "#7a58e6", "700"));
       items.push(text(this, 0, top + 285, this.level.lesson.text, 15, C.inkHex, "500").setWordWrapWidth(cw - 100));
       const hasNext = this.index + 1 < LEVELS.length;
-      items.push(
-        button(this, -150, top + ch - 46, "Replay", 0xc9bfd6, 0xa89cb8, () => this.scene.restart({ index: this.index }), 150, 50),
-        button(this, 90, top + ch - 46, hasNext ? "Next level ▶" : "Back to map", C.good, 0x229a58, () =>
-          hasNext ? this.scene.start("level", { index: this.index + 1 }) : this.scene.start("menu"), 230, 50),
-      );
+      items.push(button(this, -150, top + ch - 46, "Replay", 0xc9bfd6, 0xa89cb8, () => this.scene.restart({ index: this.index }), 150, 50));
+      if (hasNext)
+        items.push(button(this, 90, top + ch - 46, "Next level ▶", C.good, 0x229a58, () => this.scene.start("level", { index: this.index + 1 }), 230, 50));
+      else
+        // end of the campaign: straight into the next mode
+        items.push(button(this, 90, top + ch - 46, "Play Clean or Trash ▶", C.filter, C.filterDark, () => this.scene.start("trash"), 300, 50));
     } else {
       items.push(text(this, 0, top + 46, "Almost!", 36, "#ff5d73", "700"));
       let y = top + 100;
@@ -618,7 +695,9 @@ export class LevelScene extends Phaser.Scene {
       this.sparks.explode(40, W / 2, H / 2 - 120);
       if (this.level.boss) {
         const colors = [C.ok, C.filter, C.dedup, C.parse, C.normalize, C.star];
-        for (let i = 0; i < 8; i++) {
+        const bursts = this.level.boss === "final" ? 18 : 8;
+        if (this.level.boss === "final") this.cameras.main.flash(300, 255, 240, 200);
+        for (let i = 0; i < bursts; i++) {
           this.time.delayedCall(200 + i * 260, () => {
             this.sparks.setParticleTint(colors[i % colors.length]);
             this.sparks.explode(36, Phaser.Math.Between(120, W - 120), Phaser.Math.Between(80, 300));
@@ -648,13 +727,15 @@ export class LevelScene extends Phaser.Scene {
       x += blobs.some((bb) => bb.keyPii) ? 34 : 28;
     }
     // legend for the special kinds present in this level
-    const legend: string[] = [];
-    if (blobs.some((b) => b.kind === "null")) legend.push("∅ = empty row");
-    if (blobs.some((b) => b.boxed)) legend.push("📦 = raw, unparsed");
-    if (blobs.some((b) => b.upper)) legend.push("A/a = same id, different case");
-    if (blobs.some((b) => b.pii)) legend.push("🪪 = personal data");
-    if (blobs.some((b) => b.keyPii)) legend.push("x@ = the id is an email");
-    if (legend.length) text(this, 96, y + 30, legend.join("    ·    "), 13, C.mutedHex, "500").setOrigin(0, 0.5);
+    const legend: [string, string][] = []; // [full, compact]
+    if (blobs.some((b) => b.kind === "null")) legend.push(["∅ = empty row", "∅ empty"]);
+    if (blobs.some((b) => b.boxed)) legend.push(["📦 = raw, unparsed", "📦 raw"]);
+    if (blobs.some((b) => b.upper)) legend.push(["A/a = same id, different case", "A/a case"]);
+    if (blobs.some((b) => b.pii)) legend.push(["🪪 = personal data", "🪪 personal data"]);
+    if (blobs.some((b) => b.keyPii)) legend.push(["x@ = the id is an email", "x@ email id"]);
+    if (this.level.publicZone?.length) legend.push(["pink stripes = public zone", "stripes = public zone"]);
+    const compact = legend.length >= 5;
+    if (legend.length) text(this, 96, y + 30, legend.map((l) => l[compact ? 1 : 0]).join(compact ? "  ·  " : "   ·   "), 13, C.mutedHex, "500").setOrigin(0, 0.5);
   }
 
   private nudge(msg: string): void {

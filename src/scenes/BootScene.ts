@@ -45,6 +45,7 @@ export class BootScene extends Phaser.Scene {
     this.boxOverlay();
     this.shades();
     this.lock();
+    this.bin();
     this.source();
     this.sink();
     this.crate();
@@ -147,6 +148,17 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0xffffff, 0.9).fillRoundedRect(24, 38, 24, 26, 5); // door
     g.lineStyle(3, C.sink, 1).lineBetween(24, 46, 48, 46).lineBetween(24, 54, 48, 54);
     g.generateTexture("sink", 72, 72).destroy();
+  }
+
+  /** Trash bin for Clean or Trash. */
+  private bin(): void {
+    const g = this.add.graphics();
+    g.fillStyle(0xd9485f, 1).fillRoundedRect(10, 22, 52, 48, { tl: 4, tr: 4, bl: 12, br: 12 });
+    g.fillStyle(C.bad, 1).fillRoundedRect(10, 20, 52, 46, { tl: 4, tr: 4, bl: 12, br: 12 });
+    g.lineStyle(4, 0xd9485f, 1).lineBetween(24, 30, 24, 58).lineBetween(36, 30, 36, 58).lineBetween(48, 30, 48, 58);
+    g.fillStyle(0xd9485f, 1).fillRoundedRect(4, 10, 64, 10, 5); // lid
+    g.fillRoundedRect(28, 4, 16, 8, 3); // handle
+    g.generateTexture("bin", 72, 72).destroy();
   }
 
   private crate(): void {

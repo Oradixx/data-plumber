@@ -208,9 +208,9 @@ export const LEVELS: Level[] = [
   },
   {
     id: "black-friday",
-    title: "10 · BOSS — Black Friday",
+    title: "10 · MINI-BOSS — Black Friday",
     brief: "Every trap at once, three roads, not one centimetre of spare pipe. Here the ids are EMAILS…",
-    boss: true,
+    boss: "mini",
     lesson: {
       title: "Order of operations — and why it matters",
       text: "Parse → validate → normalize → deduplicate → protect. When the key itself is personal data, deduplicate (or hash consistently) BEFORE masking, or you lose rows. You just beat the boss: that's real data engineering.",
@@ -248,6 +248,55 @@ export const LEVELS: Level[] = [
       ok("e"),
     ],
   },
+  {
+    id: "year-end-close",
+    title: "11 · FINAL BOSS — Year-End Close",
+    brief: "Auditors read the warehouse: it's PUBLIC now. Typed pads. 19 cells. One way through.",
+    boss: "final",
+    lesson: {
+      title: "Plan backwards from the destination",
+      text: "Real pipelines run on infrastructure you didn't design: bolted legacy jobs, one-way flows, compute only where it's provisioned, compliance at the destination. Read the constraints, then plan backwards from the sink. Campaign complete: you think like a data engineer.",
+    },
+    cols: 10, rows: 6,
+    source: { x: 0, y: 1 }, sink: { x: 9, y: 0 },
+    walls: cells([1, 0], [2, 0], [5, 0], [5, 1], [8, 1], [8, 2], [4, 3], [7, 4], [8, 4], [1, 5], [4, 5], [5, 5]),
+    // the warehouse itself is shared with the auditors
+    publicZone: cells([1, 3], [1, 4], [8, 3], [9, 0]),
+    fixed: [{ cell: { x: 4, y: 2 }, kind: "mask" }],
+    pads: [
+      ...cells([3, 1], [5, 3], [5, 4]).map((c) => ({ ...c, only: "parse" as const })),
+      ...cells([3, 2], [6, 5], [7, 5]).map((c) => ({ ...c, only: "filter" as const })),
+      ...cells([7, 2], [6, 4]).map((c) => ({ ...c, only: "normalize" as const })),
+      ...cells([3, 0], [7, 3]).map((c) => ({ ...c, only: "dedup" as const })),
+      ...cells([6, 3], [7, 0]).map((c) => ({ ...c, only: "mask" as const })),
+    ],
+    arrows: [
+      { cell: { x: 1, y: 2 }, dir: "down" },
+      { cell: { x: 7, y: 1 }, dir: "down" },
+      { cell: { x: 8, y: 5 }, dir: "left" },
+    ],
+    maxPipe: 19,
+    parLength: 19,
+    inventory: { parse: 1, filter: 1, normalize: 1, dedup: 1, mask: 1 },
+    blobs: [
+      box(ok("a")),
+      email("ana"),
+      box(nul("n1")),
+      ok("c"),
+      upper("a"),
+      email("bob"),
+      box(email("ana", { dup: true })),
+      nul("n2"),
+      box(upper("c")),
+      email("cid"),
+      email("bob", { dup: true }),
+      box(ok("d")),
+      box(nul("n3")),
+      ok("e"),
+      box(email("dan")),
+      copy("e"),
+    ],
+  },
 ];
 
 export interface Layout {
@@ -279,25 +328,49 @@ export const SOLUTIONS: Record<string, StationKind[] | Layout> = {
     path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
     stations: [[[0, 3], "parse"], [[1, 5], "filter"], [[3, 5], "normalize"], [[4, 5], "dedup"], [[6, 5], "mask"]],
   },
+  "year-end-close": {
+    path: [[0, 1], [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [3, 4], [4, 4], [5, 4], [6, 4], [6, 3], [7, 3], [7, 2], [6, 2], [6, 1], [6, 0], [7, 0], [8, 0], [9, 0]],
+    stations: [[[3, 1], "parse"], [[3, 2], "filter"], [[6, 4], "normalize"], [[7, 3], "dedup"], [[7, 0], "mask"]],
+  },
 };
 
-/** Tempting wrong layouts for the boss: each must fail with a hint. */
-export const BOSS_TRAPS: Record<string, Layout> = {
-  "top road (bolted Mask comes too early)": {
-    path: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0], [9, 0], [9, 1], [9, 2], [9, 3], [9, 4], [9, 5]],
-    stations: [[[1, 0], "parse"], [[4, 0], "filter"], [[5, 0], "normalize"], [[7, 0], "dedup"]],
+/** Tempting wrong layouts for the bosses (per level): each must fail with a hint. */
+export const BOSS_TRAPS: Record<string, Record<string, Layout>> = {
+  "black-friday": {
+    "top road (bolted Mask comes too early)": {
+      path: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0], [9, 0], [9, 1], [9, 2], [9, 3], [9, 4], [9, 5]],
+      stations: [[[1, 0], "parse"], [[4, 0], "filter"], [[5, 0], "normalize"], [[7, 0], "dedup"]],
+    },
+    "middle road (public zone before any pad)": {
+      path: [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2], [8, 3], [8, 4], [8, 5], [9, 5]],
+      stations: [[[1, 2], "parse"], [[4, 2], "filter"], [[5, 2], "normalize"], [[6, 2], "dedup"]],
+    },
+    "bottom road, Mask before Dedup": {
+      path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
+      stations: [[[0, 3], "parse"], [[1, 5], "filter"], [[3, 5], "normalize"], [[4, 5], "mask"], [[6, 5], "dedup"]],
+    },
+    "bottom road, Mask before Parse": {
+      path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
+      stations: [[[0, 3], "mask"], [[1, 5], "parse"], [[3, 5], "filter"], [[4, 5], "normalize"], [[6, 5], "dedup"]],
+    },
   },
-  "middle road (public zone before any pad)": {
-    path: [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [5, 2], [6, 2], [7, 2], [8, 2], [8, 3], [8, 4], [8, 5], [9, 5]],
-    stations: [[[1, 2], "parse"], [[4, 2], "filter"], [[5, 2], "normalize"], [[6, 2], "dedup"]],
-  },
-  "bottom road, Mask before Dedup": {
-    path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
-    stations: [[[0, 3], "parse"], [[1, 5], "filter"], [[3, 5], "normalize"], [[4, 5], "mask"], [[6, 5], "dedup"]],
-  },
-  "bottom road, Mask before Parse": {
-    path: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5], [6, 5], [7, 5], [8, 5], [9, 5]],
-    stations: [[[0, 3], "mask"], [[1, 5], "parse"], [[3, 5], "filter"], [[4, 5], "normalize"], [[6, 5], "dedup"]],
+  "year-end-close": {
+    "shortcut through the bolted Mask": {
+      path: [[0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [4, 2], [5, 2], [6, 2], [6, 1], [6, 0], [7, 0], [8, 0], [9, 0]],
+      stations: [[[3, 1], "parse"], [[7, 0], "mask"]],
+    },
+    "top road: Dedup before Normalize": {
+      path: [[0, 1], [1, 1], [2, 1], [3, 1], [3, 0], [4, 0], [4, 1], [4, 2], [5, 2], [6, 2], [6, 1], [6, 0], [7, 0], [8, 0], [9, 0]],
+      stations: [[[3, 1], "parse"], [[3, 0], "dedup"], [[7, 0], "mask"]],
+    },
+    "right road, Mask before Dedup": {
+      path: [[0, 1], [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [3, 4], [4, 4], [5, 4], [6, 4], [6, 3], [7, 3], [7, 2], [6, 2], [6, 1], [6, 0], [7, 0], [8, 0], [9, 0]],
+      stations: [[[3, 1], "parse"], [[3, 2], "filter"], [[6, 4], "normalize"], [[6, 3], "mask"], [[7, 3], "dedup"]],
+    },
+    "right road, Normalize after Dedup": {
+      path: [[0, 1], [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [3, 4], [4, 4], [5, 4], [6, 4], [6, 3], [7, 3], [7, 2], [6, 2], [6, 1], [6, 0], [7, 0], [8, 0], [9, 0]],
+      stations: [[[3, 1], "parse"], [[3, 2], "filter"], [[7, 3], "dedup"], [[7, 2], "normalize"], [[7, 0], "mask"]],
+    },
   },
 };
 
