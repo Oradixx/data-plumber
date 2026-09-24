@@ -16,4 +16,9 @@ npm run build    # type-check + production build in dist/
 `src/core/sim.ts` holds the pure game rules (path validation, simulation, stars) and is
 unit-tested; `src/data/levels.ts` defines the levels; `src/scenes/` renders them.
 
+**9 levels** introduce five stations — Filter, Dedup, Parse, Normalize, Mask — whose **order matters**
+(Parse before Filter, Normalize before Dedup, Mask before the public zone), plus bolted-down legacy
+stations, build pads and pipe budgets. Every level has a reference solution checked by the tests,
+and the tests also prove that the tempting wrong orders fail.
+
 Roadmap: more Plumber levels · **Clean or Trash** (swipe mini-game) · **Data Factory** (real-time mode).

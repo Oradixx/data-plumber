@@ -1,11 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { canExtend, isComplete, key, simulate, type Cell, type Level, type StationKind } from "../src/core/sim.ts";
-import { LEVELS } from "../src/data/levels.ts";
+import {
+  canExtend,
+  fixedAt,
+  inPublicZone,
+  isComplete,
+  key,
+  shortestLength,
+  simulate,
+  starsFor,
+  type Cell,
+  type Level,
+  type StationKind,
+} from "../src/core/sim.ts";
+import { LEVELS, SOLUTIONS, TRAPS, type Layout } from "../src/data/levels.ts";
+import { canPlace } from "../src/core/sim.ts";
 
-/** Shortest source→sink path by breadth-first search (used to check level data). */
-function shortestPath(level: Level): Cell[] | null {
+/** Shortest source→sink pipe by breadth-first search. */
+function shortestPath(level: Level): Cell[] {
   const prev = new Map<string, Cell | null>([[key(level.source), null]]);
   const queue: Cell[] = [level.source];
   while (queue.length) {
@@ -17,69 +30,129 @@ function shortestPath(level: Level): Cell[] | null {
     }
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const next = { x: cur.x + dx, y: cur.y + dy };
-      if (!prev.has(key(next)) && canExtend(level, [cur], next)) {
+      if (!prev.has(key(next)) && canExtend({ ...level, maxPipe: undefined }, [cur], next)) {
         prev.set(key(next), cur);
         queue.push(next);
       }
     }
   }
-  return null;
+  throw new Error(`${level.id}: no path`);
+}
+
+/** Put stations, in order, on the earliest free pipe cells (not fixed, not in the public zone). */
+function place(level: Level, path: Cell[], order: StationKind[]): Map<string, StationKind> {
+  const placed = new Map<string, StationKind>();
+  let i = 1;
+  for (const kind of order) {
+    while (fixedAt(level, path[i]) || inPublicZone(level, path[i])) i++;
+    assert.ok(i < path.length - 1, `${level.id}: not enough room for ${kind}`);
+    placed.set(key(path[i]), kind);
+    i++;
+  }
+  return placed;
+}
+
+const inventoryMatches = (level: Level, order: StationKind[]) => {
+  const count: Partial<Record<StationKind, number>> = {};
+  order.forEach((k) => (count[k] = (count[k] ?? 0) + 1));
+  return Object.entries(count).every(([k, n]) => (level.inventory[k as StationKind] ?? 0) >= n);
+};
+
+function solutionOf(level: Level): { path: Cell[]; placed: Map<string, StationKind>; order: StationKind[] } {
+  const sol = SOLUTIONS[level.id];
+  if (Array.isArray(sol)) {
+    const path = shortestPath(level);
+    return { path, placed: place(level, path, sol), order: sol };
+  }
+  const layout = sol as Layout;
+  const path = layout.path.map(([x, y]) => ({ x, y }));
+  const placed = new Map<string, StationKind>(layout.stations.map(([[x, y], k]) => [key({ x, y }), k]));
+  return { path, placed, order: layout.stations.map(([, k]) => k) };
 }
 
 for (const level of LEVELS) {
-  test(`${level.id}: solvable, par values are exact, 3 stars reachable`, () => {
-    const found = shortestPath(level);
-    assert.ok(found, "no path from source to sink");
-    const path: Cell[] = found;
-    assert.equal(path.length, level.parLength, "parLength should equal the shortest path");
-    assert.ok(isComplete(level, path));
-
-    const stations = new Map<string, StationKind>();
-    level.tools.forEach((tool, i) => stations.set(key(path[1 + i]), tool));
-    const result = simulate(level, path, stations);
-    assert.equal(result.success, true, result.problems.join(" "));
-    assert.equal(result.stars, 3);
-    assert.equal(stations.size, level.parStations);
+  test(`${level.id}: the reference solution wins with 3 stars`, () => {
+    const { path, placed, order } = solutionOf(level);
+    assert.ok(isComplete(level, path), "solution pipe is not valid");
+    assert.ok(inventoryMatches(level, order), "solution uses more stations than the inventory");
+    for (const k of placed.keys()) {
+      const [x, y] = k.split(",").map(Number);
+      assert.ok(canPlace(level, { x, y }), `station not allowed at ${k}`);
+      assert.ok(path.some((c) => key(c) === k), `station at ${k} is not on the pipe`);
+    }
+    const r = simulate(level, path, placed);
+    assert.equal(r.success, true, `${r.problems.join(" ")} ${r.hints.join(" ")}`);
+    assert.equal(starsFor(r, 1), 3);
   });
+
+  test(`${level.id}: an empty pipe fails (unless it's the tutorial)`, () => {
+    const { path } = solutionOf(level);
+    const r = simulate(level, path, new Map());
+    assert.equal(r.success, (SOLUTIONS[level.id] as StationKind[]).length === 0);
+  });
+
+  for (const trap of TRAPS[level.id] ?? []) {
+    test(`${level.id}: the wrong order [${trap.join(" → ")}] fails with a hint`, () => {
+      const path = shortestPath(level);
+      const r = simulate(level, path, place(level, path, trap));
+      assert.equal(r.success, false);
+      assert.ok(r.hints.length > 0, "a failure should explain itself");
+    });
+  }
 }
 
-test("without a filter, NULL rows reach the warehouse", () => {
-  const level = LEVELS[1];
-  const path = shortestPath(level)!;
-  const result = simulate(level, path, new Map());
-  assert.equal(result.success, false);
-  assert.equal(result.delivered.bad, 2);
-  assert.match(result.problems[0], /NULL/);
+test("two-roads: the top road doesn't have enough pads", () => {
+  const level = LEVELS.find((l) => l.id === "two-roads")!;
+  const top = [[0, 2], [1, 2], [1, 1], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0], [7, 1], [7, 2], [8, 2]].map(
+    ([x, y]) => ({ x, y }),
+  );
+  assert.ok(isComplete(level, top));
+  const pads = top.filter((c) => canPlace(level, c));
+  assert.equal(pads.length, 3);
 });
 
-test("dedup lets the first copy through and drops the second", () => {
-  const level = LEVELS[2];
-  const path = shortestPath(level)!;
-  const stations = new Map<string, StationKind>([[key(path[1]), "dedup"]]);
-  const result = simulate(level, path, stations);
-  const a = result.outcomes.filter((o) => o.blob.id === "a");
-  assert.equal(a[0].removedAt, null);
-  assert.equal(a[1].removedBy, "dedup");
-  assert.equal(result.success, false); // NULLs still get through
+test("pads: stations can only be built on pads when a level has them", () => {
+  const level = LEVELS.find((l) => l.id === "privacy-zone")!;
+  assert.equal(canPlace(level, { x: 1, y: 0 }), true);
+  assert.equal(canPlace(level, { x: 3, y: 0 }), false);
 });
 
-test("a detour still wins but loses the short-path star", () => {
+test("masking inside the public zone is too late", () => {
+  const level = LEVELS.find((l) => l.id === "privacy-zone")!;
+  const { path } = solutionOf(level);
+  const placed = new Map<string, StationKind>([
+    [key({ x: 1, y: 0 }), "filter"],
+    [key({ x: 6, y: 2 }), "mask"], // after the zone: too late
+  ]);
+  const r = simulate(level, path, placed);
+  assert.equal(r.success, false);
+  assert.match(r.hints.join(" "), /BEFORE the pipe enters/);
+});
+
+test("the pipe budget blocks long detours", () => {
+  const level = LEVELS.find((l) => l.id === "legacy-trap")!;
+  const path = [level.source];
+  // walk right as far as allowed, then check the budget is enforced
+  let steps = 0;
+  while (path.length < level.maxPipe!) {
+    const last = path[path.length - 1];
+    const next = [{ x: last.x + 1, y: last.y }, { x: last.x, y: last.y + 1 }, { x: last.x, y: last.y - 1 }].find((c) =>
+      canExtend(level, path, c),
+    );
+    if (!next) break;
+    path.push(next);
+    steps++;
+  }
+  const last = path[path.length - 1];
+  if (path.length === level.maxPipe) {
+    assert.equal(canExtend(level, path, { x: last.x + 1, y: last.y }), false);
+  }
+  assert.ok(steps > 0);
+});
+
+test("stars: first-try bonus and short-pipe bonus", () => {
   const level = LEVELS[0];
-  const detour: Cell[] = [
-    { x: 0, y: 1 }, { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }, { x: 4, y: 0 },
-    { x: 5, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 1 }, { x: 6, y: 2 },
-  ];
-  assert.ok(isComplete(level, detour));
-  const r = simulate(level, detour, new Map());
-  assert.equal(r.success, true);
-  assert.equal(r.stars, detour.length <= level.parLength ? 3 : 2);
-});
-
-test("paths cannot cross walls, revisit cells or leave the grid", () => {
-  const level = LEVELS[0];
-  const start = [level.source];
-  assert.equal(canExtend(level, start, { x: 1, y: 1 }), true);
-  assert.equal(canExtend(level, start, { x: -1, y: 1 }), false);
-  assert.equal(canExtend(level, [{ x: 2, y: 1 }], { x: 3, y: 1 }), false); // wall
-  assert.equal(canExtend(level, [level.source, { x: 1, y: 1 }], level.source), false);
+  const r = simulate(level, shortestPath(level), new Map());
+  assert.equal(starsFor(r, 1), 3);
+  assert.equal(starsFor(r, 2), 2);
 });

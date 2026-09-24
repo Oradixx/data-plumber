@@ -1,58 +1,90 @@
-// Pure game logic: no Phaser here, so it can be unit-tested with `node --test`.
+// Pure game rules: no Phaser here, so everything can be unit-tested with `node --test`.
 
 export interface Cell {
   x: number;
   y: number;
 }
 
-/** ok = valid row · null = empty row · dup = the same row sent twice (same id as an ok blob). */
-export type BlobKind = "ok" | "null" | "dup";
+/**
+ * A row of data travelling through the pipe.
+ * - kind "null": an empty row, must never reach the warehouse.
+ * - id: the row key. Two rows with the same lower-cased id are duplicates.
+ * - upper: the id arrives in UPPER case ("A" vs "a"): Dedup only spots it after Normalize.
+ * - boxed: raw, unparsed payload. Filter and Dedup cannot look inside a box; Parse opens it.
+ * - pii: carries personal data. It must be Masked before entering a public zone.
+ */
 export interface BlobSpec {
   id: string;
-  kind: BlobKind;
+  kind: "ok" | "null";
+  dup?: boolean;
+  upper?: boolean;
+  boxed?: boolean;
+  pii?: boolean;
 }
 
-export type StationKind = "filter" | "dedup";
+export type StationKind = "parse" | "filter" | "normalize" | "dedup" | "mask";
+
+export interface FixedStation {
+  cell: Cell;
+  kind: StationKind;
+}
 
 export interface Level {
   id: string;
   title: string;
-  brief: string; // what the player must do
-  lesson: { title: string; text: string }; // knowledge card shown after a win
+  brief: string;
+  lesson: { title: string; text: string };
+  introduces?: StationKind[]; // stations presented in a pop-up at level start
   cols: number;
   rows: number;
   source: Cell;
   sink: Cell;
   walls: Cell[];
+  publicZone?: Cell[];
+  fixed?: FixedStation[];
+  inventory: Partial<Record<StationKind, number>>;
+  maxPipe?: number; // max number of cells in the pipe (source and sink included)
+  pads?: Cell[]; // if set, stations can only be built on these cells
+  parLength?: number; // pipe length for the 2nd star when the shortest path isn't a valid solution
   blobs: BlobSpec[];
-  tools: StationKind[];
-  parStations: number; // minimum stations needed
-  parLength: number; // shortest possible path length (cells, source and sink included)
 }
 
 export const key = (c: Cell): string => `${c.x},${c.y}`;
 export const same = (a: Cell, b: Cell): boolean => a.x === b.x && a.y === b.y;
 export const adjacent = (a: Cell, b: Cell): boolean => Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
+export const displayId = (b: BlobSpec): string => (b.upper ? b.id.toUpperCase() : b.id);
 
 export function isWalkable(level: Level, c: Cell): boolean {
   const inside = c.x >= 0 && c.y >= 0 && c.x < level.cols && c.y < level.rows;
   return inside && !level.walls.some((w) => same(w, c));
 }
 
-/** Can `next` extend the path currently ending at the last cell? */
+export function fixedAt(level: Level, c: Cell): StationKind | undefined {
+  return level.fixed?.find((f) => same(f.cell, c))?.kind;
+}
+
+/** Where can the player build a station? (on the pipe, not on a fixed station, on a pad if pads exist) */
+export function canPlace(level: Level, c: Cell): boolean {
+  if (same(c, level.source) || same(c, level.sink) || fixedAt(level, c)) return false;
+  return level.pads ? level.pads.some((p) => same(p, c)) : true;
+}
+
+export function inPublicZone(level: Level, c: Cell): boolean {
+  return level.publicZone?.some((z) => same(z, c)) ?? false;
+}
+
+/** Can `next` extend the path currently ending at its last cell? */
 export function canExtend(level: Level, path: Cell[], next: Cell): boolean {
   const last = path[path.length - 1];
   if (!last || same(last, level.sink)) return false;
-  if (!adjacent(last, next) || !isWalkable(level, next)) return false;
-  if (same(next, level.source)) return false;
+  if (level.maxPipe && path.length >= level.maxPipe) return false;
+  if (!adjacent(last, next) || !isWalkable(level, next) || same(next, level.source)) return false;
   return !path.some((c) => same(c, next));
 }
 
-/** A complete path goes from the source to the sink, one orthogonal step at a time. */
 export function isComplete(level: Level, path: Cell[]): boolean {
-  if (path.length < 2 || !same(path[0], level.source) || !same(path[path.length - 1], level.sink)) {
-    return false;
-  }
+  if (path.length < 2 || !same(path[0], level.source) || !same(path[path.length - 1], level.sink)) return false;
+  if (level.maxPipe && path.length > level.maxPipe) return false;
   const seen = new Set<string>();
   return path.every((c, i) => {
     if (seen.has(key(c)) || !isWalkable(level, c)) return false;
@@ -61,61 +93,157 @@ export function isComplete(level: Level, path: Cell[]): boolean {
   });
 }
 
-export interface BlobOutcome {
+/** Length (in cells) of the shortest possible pipe — the 2nd star target. */
+export function shortestLength(level: Level): number | null {
+  const dist = new Map<string, number>([[key(level.source), 1]]);
+  const queue: Cell[] = [level.source];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const d = dist.get(key(cur))!;
+    if (same(cur, level.sink)) return d;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const n = { x: cur.x + dx, y: cur.y + dy };
+      if (!dist.has(key(n)) && isWalkable(level, n) && !same(n, level.source)) {
+        dist.set(key(n), d + 1);
+        queue.push(n);
+      }
+    }
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------ simulation
+
+export type TraceEvent =
+  | { step: number; type: "move" }
+  | { step: number; type: "parse" | "normalize" | "mask" }
+  | { step: number; type: "drop"; by: "filter" | "dedup" }
+  | { step: number; type: "leak" }
+  | { step: number; type: "deliver"; verdict: "ok" | "null" | "boxed" | "duplicate" };
+
+export interface BlobRun {
   blob: BlobSpec;
-  /** Index in the path where the blob was removed, or null if it reached the sink. */
-  removedAt: number | null;
-  removedBy: StationKind | null;
+  events: TraceEvent[]; // in path order; one "move" per cell, plus what happened there
 }
 
 export interface Result {
-  outcomes: BlobOutcome[];
-  delivered: { ok: number; bad: number };
+  runs: BlobRun[];
   success: boolean;
-  stars: 0 | 1 | 2 | 3;
-  problems: string[]; // human-readable reasons for a failure
+  shortPipe: boolean;
+  delivered: { ok: number; bad: number; expected: number };
+  problems: string[];
+  hints: string[];
 }
 
-/**
- * Run every blob through the path. Stations sit on path cells:
- * - filter drops NULL rows;
- * - dedup drops a row whose id it has already let through (like a primary-key check).
- */
-export function simulate(level: Level, path: Cell[], stations: Map<string, StationKind>): Result {
-  const seenByDedup = new Map<string, Set<string>>();
-  const outcomes: BlobOutcome[] = level.blobs.map((blob) => {
-    for (let i = 1; i < path.length - 1; i++) {
-      const station = stations.get(key(path[i]));
-      if (station === "filter" && blob.kind === "null") {
-        return { blob, removedAt: i, removedBy: "filter" };
+export function stationsOnPath(level: Level, path: Cell[], placed: Map<string, StationKind>): (StationKind | undefined)[] {
+  return path.map((c, i) => (i === 0 || i === path.length - 1 ? undefined : fixedAt(level, c) ?? placed.get(key(c))));
+}
+
+export function simulate(level: Level, path: Cell[], placed: Map<string, StationKind>): Result {
+  const onPath = stationsOnPath(level, path, placed);
+  const dedupMemory = new Map<number, Set<string>>();
+  const deliveredIds = new Set<string>();
+  const counts = { null: 0, boxed: 0, duplicate: 0, leak: 0 };
+  const runs: BlobRun[] = [];
+
+  for (const blob of level.blobs) {
+    let boxed = !!blob.boxed;
+    let normalized = false;
+    let masked = !blob.pii;
+    let leaked = false;
+    const events: TraceEvent[] = [];
+    let dropped = false;
+
+    for (let i = 1; i < path.length && !dropped; i++) {
+      events.push({ step: i, type: "move" });
+      // Entering a public zone with unmasked personal data is a leak (checked before
+      // the station on that cell: masking inside the zone is already too late).
+      if (!masked && !leaked && inPublicZone(level, path[i])) {
+        leaked = true;
+        counts.leak++;
+        events.push({ step: i, type: "leak" });
       }
-      if (station === "dedup") {
-        const seen = seenByDedup.get(key(path[i])) ?? new Set<string>();
-        seenByDedup.set(key(path[i]), seen);
-        if (seen.has(blob.id)) return { blob, removedAt: i, removedBy: "dedup" };
-        seen.add(blob.id);
+      const st = onPath[i];
+      if (st === "parse" && boxed) {
+        boxed = false;
+        events.push({ step: i, type: "parse" });
+      } else if (st === "normalize" && !boxed && blob.upper && !normalized) {
+        normalized = true;
+        events.push({ step: i, type: "normalize" });
+      } else if (st === "mask" && !masked) {
+        masked = true;
+        events.push({ step: i, type: "mask" });
+      } else if (st === "filter" && !boxed && blob.kind === "null") {
+        events.push({ step: i, type: "drop", by: "filter" });
+        dropped = true;
+      } else if (st === "dedup" && !boxed && blob.kind === "ok") {
+        const seen = dedupMemory.get(i) ?? new Set<string>();
+        dedupMemory.set(i, seen);
+        const k = normalized ? blob.id.toLowerCase() : displayId(blob);
+        if (seen.has(k)) {
+          events.push({ step: i, type: "drop", by: "dedup" });
+          dropped = true;
+        } else seen.add(k);
       }
     }
-    return { blob, removedAt: null, removedBy: null };
-  });
-
-  const arrived = outcomes.filter((o) => o.removedAt === null);
-  const expectedOk = new Set(level.blobs.filter((b) => b.kind === "ok").map((b) => b.id)).size;
-  const deliveredOk = arrived.filter((o) => o.blob.kind === "ok").length;
-  const nulls = arrived.filter((o) => o.blob.kind === "null").length;
-  const dups = arrived.filter((o) => o.blob.kind === "dup").length;
-
-  const problems: string[] = [];
-  if (nulls) problems.push(`${nulls} empty (NULL) row${nulls > 1 ? "s" : ""} reached the warehouse.`);
-  if (dups) problems.push(`${dups} duplicate row${dups > 1 ? "s" : ""} reached the warehouse.`);
-  if (deliveredOk < expectedOk) problems.push(`${expectedOk - deliveredOk} valid row(s) never arrived.`);
-
-  const success = problems.length === 0;
-  let stars: Result["stars"] = 0;
-  if (success) {
-    stars = 1;
-    if (stations.size <= level.parStations) stars += 1;
-    if (path.length <= level.parLength) stars += 1;
+    if (!dropped) {
+      let verdict: "ok" | "null" | "boxed" | "duplicate" = "ok";
+      if (boxed) verdict = "boxed";
+      else if (blob.kind === "null") verdict = "null";
+      else if (deliveredIds.has(blob.id.toLowerCase())) verdict = "duplicate";
+      if (verdict === "ok") deliveredIds.add(blob.id.toLowerCase());
+      if (verdict !== "ok") counts[verdict]++;
+      events.push({ step: path.length - 1, type: "deliver", verdict });
+    }
+    runs.push({ blob, events });
   }
-  return { outcomes, delivered: { ok: deliveredOk, bad: nulls + dups }, success, stars: stars as Result["stars"], problems };
+
+  const expected = new Set(level.blobs.filter((b) => b.kind === "ok").map((b) => b.id.toLowerCase())).size;
+  const deliveredOk = deliveredIds.size;
+  const problems: string[] = [];
+  const hints: string[] = [];
+  const idx = (k: StationKind) => onPath.indexOf(k);
+  const plural = (n: number, w: string) => `${n} ${w}${n > 1 ? "s" : ""}`;
+
+  if (counts.boxed) {
+    problems.push(`${plural(counts.boxed, "raw box")} reached the warehouse unopened.`);
+    hints.push("Warehouses can't load raw payloads: put a Parse on the pipe.");
+  }
+  if (counts.null) {
+    problems.push(`${plural(counts.null, "empty (NULL) row")} got through.`);
+    const boxedNull = level.blobs.some((b) => b.boxed && b.kind === "null");
+    if (idx("filter") < 0) hints.push("A Filter removes empty rows.");
+    else if (boxedNull && (idx("parse") < 0 || idx("parse") > idx("filter")))
+      hints.push("A Filter can't see inside a box: Parse must come BEFORE the Filter.");
+  }
+  if (counts.duplicate) {
+    problems.push(`${plural(counts.duplicate, "duplicate")} landed in the warehouse.`);
+    const hasUpper = level.blobs.some((b) => b.upper);
+    if (idx("dedup") < 0) hints.push("A Dedup drops rows whose id it has already seen.");
+    else if (hasUpper && (idx("normalize") < 0 || idx("normalize") > onPath.lastIndexOf("dedup")))
+      hints.push('Dedup compares ids exactly: "A" ≠ "a". Normalize them BEFORE the Dedup.');
+    else if (level.blobs.some((b) => b.boxed && b.dup))
+      hints.push("Dedup can't read the id of a boxed row: Parse first.");
+  }
+  if (counts.leak) {
+    problems.push(`${plural(counts.leak, "row")} with personal data entered the public zone unmasked.`);
+    hints.push("Mask personal data BEFORE the pipe enters the striped public zone.");
+  }
+  if (deliveredOk < expected) problems.push(`${plural(expected - deliveredOk, "valid row")} never arrived.`);
+
+  const best = level.parLength ?? shortestLength(level) ?? path.length;
+  return {
+    runs,
+    success: problems.length === 0,
+    shortPipe: path.length <= best,
+    delivered: { ok: deliveredOk, bad: counts.boxed + counts.null + counts.duplicate, expected },
+    problems,
+    hints,
+  };
+}
+
+/** 1 star for a clean delivery, +1 for the shortest pipe, +1 when it works on the first run. */
+export function starsFor(result: Result, attempts: number): 0 | 1 | 2 | 3 {
+  if (!result.success) return 0;
+  return (1 + (result.shortPipe ? 1 : 0) + (attempts <= 1 ? 1 : 0)) as 1 | 2 | 3;
 }

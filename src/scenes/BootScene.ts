@@ -25,6 +25,26 @@ export class BootScene extends Phaser.Scene {
       g.lineStyle(4, 0xffffff, 1).strokeCircle(38, 30, 9);
       g.lineStyle(4, C.dedupDark, 1).lineBetween(32, 42, 44, 18);
     });
+    this.station("st-parse", C.parse, C.parseDark, (g) => {
+      // an open box
+      g.fillStyle(0xffffff, 1).fillRect(20, 28, 24, 16);
+      g.fillTriangle(20, 28, 14, 20, 30, 24).fillTriangle(44, 28, 50, 20, 34, 24);
+    });
+    this.station("st-normalize", C.normalize, C.normalizeDark, (g) => {
+      // "Aa" drawn as shapes: a big triangle A and a small round a
+      g.lineStyle(5, 0xffffff, 1).beginPath().moveTo(14, 42).lineTo(23, 16).lineTo(32, 42).strokePath();
+      g.lineBetween(18, 33, 28, 33);
+      g.strokeCircle(42, 36, 6).lineBetween(48, 30, 48, 43);
+    });
+    this.station("st-mask", C.mask, C.maskDark, (g) => {
+      // sunglasses
+      g.fillStyle(0xffffff, 1).fillRoundedRect(12, 24, 17, 12, 5).fillRoundedRect(35, 24, 17, 12, 5);
+      g.lineStyle(4, 0xffffff, 1).lineBetween(28, 28, 36, 28);
+    });
+    this.pad();
+    this.boxOverlay();
+    this.shades();
+    this.lock();
     this.source();
     this.sink();
     this.crate();
@@ -69,6 +89,41 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0xffffff, 0.9).fillCircle(14, 50, 2.5).fillCircle(22, 50, 2.5);
     icon(g);
     g.generateTexture(keyName, 64, 64).destroy();
+  }
+
+  private pad(): void {
+    const g = this.add.graphics();
+    g.fillStyle(C.padDark, 1).fillCircle(32, 35, 26);
+    g.fillStyle(C.pad, 1).fillCircle(32, 32, 26);
+    g.lineStyle(3, C.padDark, 1).strokeCircle(32, 32, 18);
+    g.fillStyle(C.padDark, 1).fillCircle(32, 12, 3).fillCircle(32, 52, 3).fillCircle(12, 32, 3).fillCircle(52, 32, 3);
+    g.generateTexture("pad", 64, 64).destroy();
+  }
+
+  private boxOverlay(): void {
+    const g = this.add.graphics();
+    g.fillStyle(C.boxDark, 1).fillRoundedRect(4, 12, 44, 36, 6);
+    g.fillStyle(C.box, 1).fillRoundedRect(4, 8, 44, 36, 6);
+    g.fillStyle(C.boxDark, 1).fillRect(22, 8, 8, 36); // tape
+    g.fillStyle(0xffffff, 0.9).fillCircle(26, 30, 8);
+    g.fillStyle(C.boxDark, 1).fillRect(24, 26, 4, 6).fillCircle(26, 35, 2); // "!"
+    g.generateTexture("box", 52, 52).destroy();
+  }
+
+  private shades(): void {
+    const g = this.add.graphics();
+    g.fillStyle(0x1b1428, 1).fillRoundedRect(2, 2, 18, 12, 5).fillRoundedRect(26, 2, 18, 12, 5);
+    g.lineStyle(3, 0x1b1428, 1).lineBetween(18, 6, 28, 6);
+    g.fillStyle(0xffffff, 0.5).fillRect(6, 5, 5, 2).fillRect(30, 5, 5, 2);
+    g.generateTexture("shades", 46, 16).destroy();
+  }
+
+  private lock(): void {
+    const g = this.add.graphics();
+    g.lineStyle(4, 0x3a2e4f, 1).strokeCircle(12, 10, 6);
+    g.fillStyle(0x3a2e4f, 1).fillRoundedRect(3, 10, 18, 14, 4);
+    g.fillStyle(0xffd166, 1).fillCircle(12, 17, 2.5);
+    g.generateTexture("lock", 24, 26).destroy();
   }
 
   private source(): void {
