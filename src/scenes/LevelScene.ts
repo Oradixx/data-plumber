@@ -24,7 +24,7 @@ import {
   type StationKind,
 } from "../core/sim.ts";
 import { LEVELS, STATION_INFO } from "../data/levels.ts";
-import { background, button, C, H, hex, save, text, W } from "../theme.ts";
+import { arrive, background, button, C, go, H, hex, save, text, W } from "../theme.ts";
 
 const LOOK: Record<StationKind, { tex: string; color: number; dark: number }> = {
   parse: { tex: "st-parse", color: C.parse, dark: C.parseDark },
@@ -107,7 +107,7 @@ export class LevelScene extends Phaser.Scene {
     this.oy = Math.round(352 - (L.rows * this.cell) / 2);
 
     // ---- header
-    button(this, 50, 42, "←", C.pipe, 0x3d5ad6, () => this.scene.start("menu"), 58, 48);
+    button(this, 50, 42, "←", C.pipe, 0x3d5ad6, () => go(this, "menu"), 58, 48);
     text(this, 96, 30, L.title, 28, L.boss ? "#ff5d73" : C.inkHex, "700").setOrigin(0, 0.5);
     this.hint = text(this, 96, 62, L.brief, 17, C.mutedHex, "500").setOrigin(0, 0.5);
     this.incoming(L.blobs);
@@ -156,7 +156,7 @@ export class LevelScene extends Phaser.Scene {
     this.input.on("pointerup", () => (this.drawing = false));
 
     this.redraw();
-    this.cameras.main.fadeIn(250, 255, 244, 230);
+    arrive(this);
     if (L.boss) this.bossIntro();
     else if (L.introduces?.length) this.introduce(L.introduces);
   }
@@ -206,7 +206,7 @@ export class LevelScene extends Phaser.Scene {
       const p = this.center(c);
       this.add.image(p.x, p.y, "pad").setScale((this.cell * 0.78) / 64).setDepth(0.5).setAlpha(0.95);
       // a typed pad shows the only station it accepts, as a ghost
-      if (c.only) this.add.image(p.x, p.y, LOOK[c.only].tex).setScale((this.cell * 0.5) / 64).setDepth(0.6).setAlpha(0.45);
+      if (c.only) this.add.image(p.x, p.y, LOOK[c.only].tex).setScale((this.cell * 0.5) / 64).setDepth(1.5).setAlpha(0.6);
     }
     for (const a of L.arrows ?? []) this.conveyor(a.cell, a.dir);
     for (const w of L.walls) {
@@ -225,15 +225,18 @@ export class LevelScene extends Phaser.Scene {
     const angle = { right: 0, down: 90, left: 180, up: 270 }[dir];
     const chev = this.add.graphics();
     const u = this.cell / 10;
-    for (const off of [-1.6 * u, 0.6 * u]) {
-      chev.lineStyle(u * 0.7, C.pipe, 0.9);
-      chev.beginPath();
-      chev.moveTo(off - u, -1.3 * u);
-      chev.lineTo(off + 0.4 * u, 0);
-      chev.lineTo(off - u, 1.3 * u);
-      chev.strokePath();
+    // dark outline + white core: readable on the belt AND on top of a blue pipe
+    for (const [w, color] of [[u * 1.1, 0x2a3f9e], [u * 0.5, 0xffffff]] as const) {
+      for (const off of [-1.6 * u, 0.6 * u]) {
+        chev.lineStyle(w, color, 1);
+        chev.beginPath();
+        chev.moveTo(off - u, -1.3 * u);
+        chev.lineTo(off + 0.4 * u, 0);
+        chev.lineTo(off - u, 1.3 * u);
+        chev.strokePath();
+      }
     }
-    const holder = this.add.container(p.x, p.y, [chev]).setAngle(angle).setDepth(0.45);
+    const holder = this.add.container(p.x, p.y, [chev]).setAngle(angle).setDepth(1.5);
     this.tweens.add({ targets: chev, x: u * 1.2, alpha: { from: 1, to: 0.35 }, duration: 520, repeat: -1 });
     void holder;
   }
@@ -377,7 +380,7 @@ export class LevelScene extends Phaser.Scene {
     this.tweens.add({ targets: img, scale: (this.cell * 0.8) / 64, duration: 260, ease: "Back.out" });
     this.placed.set(k, this.tool!);
     this.sprites.set(k, img);
-    this.refreshCounts();
+    this.selectTool(this.tool!); // built: drop the tool, no need to click it again
   }
 
   private removeStation(k: string): void {
@@ -668,10 +671,13 @@ export class LevelScene extends Phaser.Scene {
       const hasNext = this.index + 1 < LEVELS.length;
       items.push(button(this, -150, top + ch - 46, "Replay", 0xc9bfd6, 0xa89cb8, () => this.scene.restart({ index: this.index }), 150, 50));
       if (hasNext)
-        items.push(button(this, 90, top + ch - 46, "Next level ▶", C.good, 0x229a58, () => this.scene.start("level", { index: this.index + 1 }), 230, 50));
+        items.push(button(this, 90, top + ch - 46, "Next level ▶", C.good, 0x229a58, () => go(this, "level", { index: this.index + 1 }), 230, 50));
       else
-        // end of the campaign: straight into the next mode
-        items.push(button(this, 90, top + ch - 46, "Play Clean or Trash ▶", C.filter, C.filterDark, () => this.scene.start("trash"), 300, 50));
+        // end of chapter 2: on to the Data Factory (through its cutscene the first time)
+        items.push(
+          button(this, 90, top + ch - 46, "Chapter 3 ▶", C.dedup, C.dedupDark, () =>
+            save.flags().seen.includes("ch3") ? go(this, "factory") : go(this, "story", { id: "ch3" }), 260, 50),
+        );
     } else {
       items.push(text(this, 0, top + 46, "Almost!", 36, "#ff5d73", "700"));
       let y = top + 100;

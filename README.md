@@ -16,23 +16,25 @@ npm run build    # type-check + production build in dist/
 `src/core/sim.ts` holds the pure game rules (path validation, simulation, stars) and is
 unit-tested; `src/data/levels.ts` defines the levels; `src/scenes/` renders them.
 
-## Modes
+## Story mode — three chapters
 
-**Data Plumber — the campaign (11 levels).** Five stations — Filter, Dedup, Parse, Normalize, Mask — whose
-**order matters** (Parse before Filter, Normalize before Dedup, Dedup before masking an email id, Mask before
-the public zone), plus bolted-down legacy stations, build pads, pipe budgets, typed pads and one-way conveyors.
+The game follows the path of a real data team: **by hand → automated → live**. Ada, the lead data
+engineer, introduces each chapter in a short cutscene; a pipe sweeps across the screen between scenes,
+and the map's **Continue** button always jumps to the next step (`src/core/story.ts`, tested).
 
-- Level 10 is the **mini-boss** (Black Friday): every rule at once, three roads, no spare pipe.
-- Level 11 is the **final boss** (Year-End Close): the solver in `src/core/solver.ts` proves there are
-  ~500 legal pipes and **exactly one** winning layout; random play wins about 0.03% of the time.
-  The layout was found by `scripts/gen-boss.ts` (seeded random search scored by the solver).
-
-**Clean or Trash — the swipe mini-game.** Rows stream in; swipe right to keep clean ones, left to trash
-dirty ones. The four classic data-quality checks unlock one by one — completeness, validity, conformity,
-uniqueness — against a shrinking timer, with combos and 3 lives. Rules live in `src/core/trash.ts`,
-where the tests check that every dealt row has at most one flaw and never one from a locked rule.
-
-**Data Factory** (real-time mode) is next.
+1. **Clean or Trash** — the intern sorts rows by hand. Swipe right to keep, left to trash. The four
+   classic data-quality checks unlock one by one (completeness, validity, conformity, uniqueness)
+   against a shrinking timer, with combos and 3 lives. Sort 30 right to finish the chapter.
+   Rules: `src/core/trash.ts` — tests check every dealt row has at most one flaw, never from a locked rule.
+2. **Data Plumber** — automate those checks: lay pipes and place Filter, Dedup, Parse, Normalize and Mask
+   stations, whose **order matters**. 11 levels with bolted legacy stations, build pads, pipe budgets,
+   typed pads and one-way conveyors. Level 10 is the **mini-boss** (Black Friday); level 11 is the
+   **final boss** (Year-End Close): the solver in `src/core/solver.ts` proves ~500 legal pipes and
+   **exactly one** winning layout. The layout was found by `scripts/gen-boss.ts`.
+3. **Data Factory** — run it live. Three conveyor lanes, a data mix that keeps changing (retries, a new
+   source, a legacy system, compliance, Black Friday, then random schema drift), credits to spend,
+   stations that overheat, and an SLA to keep above zero for a 3-minute shift.
+   Rules: `src/core/factory.ts` — tests replay whole shifts deterministically from a seed.
 
 ## Tests
 

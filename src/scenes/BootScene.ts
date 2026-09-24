@@ -1,5 +1,7 @@
 import Phaser from "phaser";
-import { C } from "../theme.ts";
+import { nextStep } from "../core/story.ts";
+import { LEVELS } from "../data/levels.ts";
+import { C, save } from "../theme.ts";
 
 /**
  * Every illustration is drawn in code and baked into a texture once:
@@ -46,6 +48,7 @@ export class BootScene extends Phaser.Scene {
     this.shades();
     this.lock();
     this.bin();
+    this.ada();
     this.source();
     this.sink();
     this.crate();
@@ -60,7 +63,12 @@ export class BootScene extends Phaser.Scene {
 
     // Wait for the web font so the first texts render with it.
     const fontReady = document.fonts?.load('600 24px "Fredoka"').catch(() => undefined);
-    Promise.race([fontReady, new Promise((r) => setTimeout(r, 1500))]).then(() => this.scene.start("menu"));
+    Promise.race([fontReady, new Promise((r) => setTimeout(r, 1500))]).then(() => {
+      // a brand-new player goes straight into the prologue; everyone else gets the map
+      const step = nextStep(save.flags(), save.stars(), LEVELS.map((l) => l.id));
+      if (step.scene === "story" && step.data.id === "prologue") this.scene.start("story", step.data);
+      else this.scene.start("menu");
+    });
   }
 
   private blob(keyName: string, fill: number, dark: number, mood: "happy" | "meh"): void {
@@ -148,6 +156,28 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0xffffff, 0.9).fillRoundedRect(24, 38, 24, 26, 5); // door
     g.lineStyle(3, C.sink, 1).lineBetween(24, 46, 48, 46).lineBetween(24, 54, 48, 54);
     g.generateTexture("sink", 72, 72).destroy();
+  }
+
+  /** Ada, the lead data engineer: a big pink blob with round glasses and an on-call headset. */
+  private ada(): void {
+    const g = this.add.graphics();
+    const cx = 60;
+    g.fillStyle(C.sourceDark, 1).fillEllipse(cx, 70, 96, 84);
+    g.fillStyle(C.source, 1).fillEllipse(cx, 64, 96, 84);
+    g.fillStyle(0xffffff, 0.3).fillEllipse(cx - 20, 38, 26, 12);
+    // headset
+    g.lineStyle(6, C.ink, 1).beginPath().arc(cx, 60, 50, Math.PI * 1.08, Math.PI * 1.92).strokePath();
+    g.fillStyle(C.ink, 1).fillRoundedRect(cx - 58, 52, 14, 24, 6).fillRoundedRect(cx + 44, 52, 14, 24, 6);
+    g.lineStyle(4, C.ink, 1).beginPath().moveTo(cx - 50, 74).lineTo(cx - 36, 92).lineTo(cx - 14, 94).strokePath();
+    g.fillStyle(C.ink, 1).fillCircle(cx - 12, 94, 5);
+    // eyes behind round glasses
+    g.fillStyle(0xffffff, 1).fillCircle(cx - 17, 60, 13).fillCircle(cx + 17, 60, 13);
+    g.fillStyle(0x2b2340, 1).fillCircle(cx - 15, 62, 5).fillCircle(cx + 19, 62, 5);
+    g.lineStyle(4, C.ink, 1).strokeCircle(cx - 17, 60, 15).strokeCircle(cx + 17, 60, 15).lineBetween(cx - 2, 58, cx + 2, 58);
+    // smile + cheeks
+    g.lineStyle(4, 0x2b2340, 1).beginPath().arc(cx, 80, 9, 0.15 * Math.PI, 0.85 * Math.PI).strokePath();
+    g.fillStyle(0xffffff, 0.35).fillEllipse(cx - 32, 80, 12, 7).fillEllipse(cx + 32, 80, 12, 7);
+    g.generateTexture("ada", 120, 112).destroy();
   }
 
   /** Trash bin for Clean or Trash. */

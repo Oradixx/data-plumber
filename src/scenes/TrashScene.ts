@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { activeRules, deal, multiplier, RULES, rng, timeLimit, type Deal, type Row, type RuleId } from "../core/trash.ts";
-import { background, button, C, H, hex, save, text, W } from "../theme.ts";
+import { CH1_GOAL } from "../core/story.ts";
+import { arrive, background, button, C, go, H, hex, save, text, W } from "../theme.ts";
 
 const STATION_TEX: Record<string, string> = { filter: "st-filter", normalize: "st-normalize", dedup: "st-dedup" };
 const CARD_X = W / 2;
@@ -57,6 +58,7 @@ export class TrashScene extends Phaser.Scene {
   private houseImg!: Phaser.GameObjects.Image;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private overlay?: Phaser.GameObjects.Container;
+  private goalText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("trash");
@@ -87,13 +89,14 @@ export class TrashScene extends Phaser.Scene {
 
   create(): void {
     background(this);
-    button(this, 50, 42, "←", C.pipe, 0x3d5ad6, () => this.scene.start("menu"), 58, 48);
+    button(this, 50, 42, "←", C.pipe, 0x3d5ad6, () => go(this, "menu"), 58, 48);
     text(this, 96, 30, "Clean or Trash", 28, hex(C.filterDark), "700").setOrigin(0, 0.5);
     this.feedback = text(this, 96, 62, "Swipe → to keep a clean row, ← to trash a dirty one.", 17, C.mutedHex, "500").setOrigin(0, 0.5);
     this.scoreText = text(this, W - 24, 28, "0", 26, C.inkHex, "700").setOrigin(1, 0.5);
     text(this, W - 24, 52, `best ${save.best("trash")}`, 13, C.mutedHex, "600").setOrigin(1, 0.5);
     for (let i = 0; i < LIVES; i++) this.hearts.push(text(this, W - 190 + i * 30, 30, "❤", 24, "#ff5d73", "700"));
     this.comboText = text(this, W - 160, 58, "", 15, "#e07f22", "700");
+    this.goalText = text(this, W / 2, 170, "", 15, C.mutedHex, "700");
 
     // rules bar: one chip per rule, locked ones hidden behind a "?"
     RULES.forEach((rule, i) => {
@@ -131,7 +134,7 @@ export class TrashScene extends Phaser.Scene {
     kb?.on("keydown-D", () => this.answer("keep"));
 
     this.updateHud();
-    this.cameras.main.fadeIn(250, 255, 244, 230);
+    arrive(this);
     this.howTo();
   }
 
@@ -204,7 +207,9 @@ export class TrashScene extends Phaser.Scene {
       if (verdict.keep) this.warehouse.set(row.id, row);
       this.float(goesRight ? W - 120 : 120, CARD_Y - 90, `+${pts}`, goesRight ? C.good : C.bad);
       this.feedback.setText(verdict.keep ? "Clean ✓" : `Trashed ✓ — ${verdict.reason}`).setColor(verdict.keep ? "#2fbf71" : "#7a58e6");
-      this.fly(goesRight, () => this.nextRule() || this.nextCard());
+      const chapterDone = this.correct >= CH1_GOAL && !save.flags().ch1;
+      if (chapterDone) save.updateFlags((f) => (f.ch1 = true));
+      this.fly(goesRight, () => (chapterDone ? this.chapterComplete() : this.nextRule() || this.nextCard()));
     } else {
       this.streak = 0;
       this.lives--;
@@ -347,6 +352,7 @@ export class TrashScene extends Phaser.Scene {
     const m = multiplier(this.streak);
     this.comboText.setText(m > 1 ? `🔥 combo ×${m}` : "");
     const recent = [...this.warehouse.keys()].slice(-6);
+    this.goalText.setText(save.flags().ch1 ? "" : `Chapter goal: ${Math.min(this.correct, CH1_GOAL)} / ${CH1_GOAL} rows sorted right`);
     this.strip.setText(recent.length ? `In the warehouse:  ${recent.map((id) => `#${id}`).join("   ")}` : "The warehouse is empty.");
   }
 
@@ -356,11 +362,21 @@ export class TrashScene extends Phaser.Scene {
     this.tweens.add({ targets: t, y: y - 50, alpha: 0, duration: 800, onComplete: () => t.destroy() });
   }
 
-  private modal(title: string, body: string, cta: string, color: number, dark: number, onClose: () => void, icon?: string): void {
+  private modal(
+    title: string,
+    body: string,
+    cta: string,
+    color: number,
+    dark: number,
+    onClose: () => void,
+    icon?: string,
+    alt?: { label: string; act: () => void },
+  ): void {
     this.paused = true;
     const dim = this.add.graphics().fillStyle(0x3a2e4f, 0.45).fillRect(0, 0, W, H);
     const cw = 600;
-    const ch = icon ? 330 : 360;
+    const bodyText = text(this, 0, 0, body, 17, C.inkHex, "500").setOrigin(0.5, 0).setWordWrapWidth(cw - 70);
+    const ch = 44 + (icon ? 66 : 0) + 30 + bodyText.height + 110;
     const card = this.add.graphics();
     card.fillStyle(dark, 1).fillRoundedRect(-cw / 2, -ch / 2 + 8, cw, ch, 28);
     card.fillStyle(0xffffff, 1).fillRoundedRect(-cw / 2, -ch / 2, cw, ch, 28);
@@ -371,17 +387,33 @@ export class TrashScene extends Phaser.Scene {
       y += 66;
     }
     items.push(text(this, 0, y, title, 28, hex(dark), "700"));
-    items.push(text(this, 0, y + 30, body, 17, C.inkHex, "500").setOrigin(0.5, 0).setWordWrapWidth(cw - 70));
+    items.push(bodyText.setY(y + 30));
     const box = this.add.container(W / 2, H / 2, items).setScale(0.8);
     this.overlay = this.add.container(0, 0, [dim, box]).setDepth(60);
-    box.add(
-      button(this, 0, ch / 2 - 40, cta, color, dark, () => {
-        this.overlay?.destroy();
-        this.overlay = undefined;
-        onClose();
-      }, 200, 52),
-    );
+    const close = (then: () => void) => () => {
+      this.overlay?.destroy();
+      this.overlay = undefined;
+      then();
+    };
+    box.add(button(this, alt ? 120 : 0, ch / 2 - 40, cta, color, dark, close(onClose), alt ? 230 : 200, 52));
+    if (alt) box.add(button(this, -130, ch / 2 - 40, alt.label, 0xc9bfd6, 0xa89cb8, close(alt.act), 210, 52));
     this.tweens.add({ targets: box, scale: 1, duration: 260, ease: "Back.out" });
+  }
+
+  /** Chapter 1 goal reached: go on with the story, or keep sorting for a high score. */
+  private chapterComplete(): void {
+    this.sparks.setParticleTint(C.star);
+    this.sparks.explode(40, W / 2, 200);
+    this.modal(
+      "⭐ Chapter 1 complete!",
+      `${CH1_GOAL} rows sorted by hand, all four quality checks mastered. Ada has something better to show you…`,
+      "Chapter 2 ▶",
+      C.good,
+      0x229a58,
+      () => go(this, save.flags().seen.includes("ch2") ? "level" : "story", save.flags().seen.includes("ch2") ? { index: 0 } : { id: "ch2" }),
+      undefined,
+      { label: "Keep sorting", act: () => this.nextRule() || this.nextCard() },
+    );
   }
 
   private gameOver(): void {
@@ -422,7 +454,7 @@ export class TrashScene extends Phaser.Scene {
         .setWordWrapWidth(cw - 100),
     );
     items.push(
-      button(this, -130, top + ch - 46, "Map", 0xc9bfd6, 0xa89cb8, () => this.scene.start("menu"), 150, 50),
+      button(this, -130, top + ch - 46, "Map", 0xc9bfd6, 0xa89cb8, () => go(this, "menu"), 150, 50),
       button(this, 100, top + ch - 46, "Play again", C.filter, C.filterDark, () => this.scene.restart(), 210, 50),
     );
     const box = this.add.container(W / 2, H / 2 + 30, items).setAlpha(0);

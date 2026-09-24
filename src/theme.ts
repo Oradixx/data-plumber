@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { emptyFlags, type StoryFlags } from "./core/story.ts";
 
 export const W = 1000;
 export const H = 680;
@@ -140,6 +141,23 @@ export const save = {
       return 0;
     }
   },
+  flags(): StoryFlags {
+    try {
+      return { ...emptyFlags(), ...JSON.parse(localStorage.getItem("dp.story") ?? "{}") };
+    } catch {
+      return emptyFlags();
+    }
+  },
+  updateFlags(change: (f: StoryFlags) => void): StoryFlags {
+    const f = save.flags();
+    change(f);
+    try {
+      localStorage.setItem("dp.story", JSON.stringify(f));
+    } catch {
+      /* ignore */
+    }
+    return f;
+  },
   /** Stores the score if it beats the best one; returns true for a new record. */
   setBest(game: string, score: number): boolean {
     if (score <= save.best(game)) return false;
@@ -151,3 +169,48 @@ export const save = {
     return true;
   },
 };
+
+// ---- scene transitions: a big pipe sweeps across the screen, blobs riding on it
+let wipePending = false;
+
+function pipeBand(scene: Phaser.Scene): Phaser.GameObjects.Container {
+  const g = scene.add.graphics();
+  g.fillStyle(0x3d5ad6, 1).fillRect(-W / 2 - 40, -H / 2, W + 80, H);
+  g.fillStyle(C.pipe, 1).fillRect(-W / 2 - 40, -H / 2 + 24, W + 80, H - 48);
+  g.fillStyle(C.pipeLight, 1).fillRect(-W / 2 - 40, -H / 2 + 60, W + 80, 26);
+  const kids: Phaser.GameObjects.GameObject[] = [g];
+  ["blob-ok", "blob-null", "blob-ok", "blob-ok"].forEach((k, i) => kids.push(scene.add.image(-270 + i * 180, 40, k).setScale(1.6)));
+  return scene.add.container(W / 2, H / 2, kids).setDepth(1000);
+}
+
+/** Leave the current scene with a pipe wipe, then start `key`. */
+export function go(scene: Phaser.Scene, key: string, data?: object): void {
+  if (scene.data.get("leaving")) return;
+  scene.data.set("leaving", true);
+  scene.input.enabled = false;
+  const band = pipeBand(scene);
+  band.x = -W / 2 - 60;
+  scene.tweens.add({
+    targets: band,
+    x: W / 2,
+    duration: 380,
+    ease: "Cubic.in",
+    onComplete: () => {
+      wipePending = true;
+      scene.scene.start(key, data);
+    },
+  });
+}
+
+/** Call at the end of create(): finishes the wipe (or fades in when there was none). */
+export function arrive(scene: Phaser.Scene): void {
+  scene.data.set("leaving", false);
+  scene.input.enabled = true;
+  if (!wipePending) {
+    scene.cameras.main.fadeIn(250, 255, 244, 230);
+    return;
+  }
+  wipePending = false;
+  const band = pipeBand(scene);
+  scene.tweens.add({ targets: band, x: W * 1.5 + 60, duration: 420, ease: "Cubic.out", onComplete: () => band.destroy() });
+}

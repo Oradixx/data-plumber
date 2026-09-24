@@ -23,7 +23,7 @@ export interface Rule {
 
 /** In unlock order. The names are the classic data-quality dimensions. */
 export const RULES: Rule[] = [
-  { id: "empty", name: "Empty values", explain: "A field is NULL: the row is incomplete. Trash it.", station: "filter", link: "In Data Plumber, the Filter station does exactly this.", unlockAt: 0 },
+  { id: "empty", name: "Empty values", explain: "A field is NULL: the row is incomplete. Trash it.", station: "filter", link: "Soon you won't do this by hand: a Filter station will do it for you.", unlockAt: 0 },
   {
     id: "impossible",
     name: "Impossible values",
@@ -45,7 +45,7 @@ export const RULES: Rule[] = [
     name: "Duplicates",
     explain: "Same id as a row already in the warehouse: it's a copy. Trash it (check the strip below).",
     station: "dedup",
-    link: "In Data Plumber, the Dedup station does exactly this.",
+    link: "Soon a Dedup station will do this for you, automatically.",
     unlockAt: 24,
   },
 ];
