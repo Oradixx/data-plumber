@@ -1,5 +1,7 @@
 # Data Plumber
 
+**▶ Play: https://oradixx.github.io/data-plumber/**
+
 A casual puzzle game about data pipelines. Lay a pipe from the API to the warehouse,
 drop stations on it (Filter, Dedup…) and press **Run**: cute data blobs flow through,
 and only clean rows should reach the warehouse. Each level ends with a short lesson card.
