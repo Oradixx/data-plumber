@@ -5,13 +5,13 @@ import { MenuScene } from "./scenes/MenuScene.ts";
 import { TrashScene } from "./scenes/TrashScene.ts";
 import { StoryScene } from "./scenes/StoryScene.ts";
 import { FactoryScene } from "./scenes/FactoryScene.ts";
-import { C, H, W } from "./theme.ts";
+import { C, H, R, W } from "./theme.ts";
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "game",
-  width: W,
-  height: H,
+  width: W * R,
+  height: H * R,
   backgroundColor: C.bg,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   input: { activePointers: 2 },

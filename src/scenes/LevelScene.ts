@@ -167,8 +167,8 @@ export class LevelScene extends Phaser.Scene {
   }
 
   private cellAt(p: Phaser.Input.Pointer): Cell | null {
-    const x = Math.floor((p.x - this.ox) / this.cell);
-    const y = Math.floor((p.y - this.oy) / this.cell);
+    const x = Math.floor((p.worldX - this.ox) / this.cell);
+    const y = Math.floor((p.worldY - this.oy) / this.cell);
     return x >= 0 && y >= 0 && x < this.level.cols && y < this.level.rows ? { x, y } : null;
   }
 

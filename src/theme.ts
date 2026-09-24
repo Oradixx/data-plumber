@@ -3,6 +3,17 @@ import { emptyFlags, type StoryFlags } from "./core/story.ts";
 
 export const W = 1000;
 export const H = 680;
+
+/**
+ * Render scale. The game is designed on a 1000×680 board, but the canvas is rendered R times
+ * bigger (cameras zoom by R, textures and texts are baked at R×) so it stays sharp on big and
+ * Retina screens instead of being stretched. R follows the screen: 1 on a small window, up to 3.
+ */
+export const R = (() => {
+  if (typeof window === "undefined") return 1;
+  const fit = Math.min(window.innerWidth / W, window.innerHeight / H);
+  return Math.max(1, Math.min(3, Math.ceil(fit * (window.devicePixelRatio || 1) - 0.05)));
+})();
 export const FONT = '"Fredoka", "Nunito", system-ui, sans-serif';
 
 export const C = {
@@ -61,7 +72,7 @@ export function text(
   weight = "600",
 ): Phaser.GameObjects.Text {
   return scene.add
-    .text(x, y, value, { fontFamily: FONT, fontSize: `${size}px`, color, fontStyle: weight, align: "center" })
+    .text(x, y, value, { fontFamily: FONT, fontSize: `${size}px`, color, fontStyle: weight, align: "center", resolution: R })
     .setOrigin(0.5);
 }
 
@@ -108,6 +119,8 @@ export function button(
 
 /** Polka-dot factory floor background. */
 export function background(scene: Phaser.Scene): void {
+  // every scene draws in 1000×680 "board" units; the camera maps them to the R× canvas
+  scene.cameras.main.setZoom(R).centerOn(W / 2, H / 2);
   scene.cameras.main.setBackgroundColor(C.bg);
   const g = scene.add.graphics().setDepth(-10);
   g.fillStyle(C.bgDots, 1);

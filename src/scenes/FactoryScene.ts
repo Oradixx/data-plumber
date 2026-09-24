@@ -282,9 +282,9 @@ export class FactoryScene extends Phaser.Scene {
   // ------------------------------------------------------------ input
   private onTap(p: Phaser.Input.Pointer): void {
     if (this.overlay || this.f.over) return;
-    const lane = LANE_Y.findIndex((y) => Math.abs(p.y - y) < 40);
-    if (lane < 0 || p.x < X0 - 20 || p.x > X1 + 20) return;
-    const slot = SLOTS.findIndex((_, i) => Math.abs(p.x - slotX(i)) < 44);
+    const lane = LANE_Y.findIndex((y) => Math.abs(p.worldY - y) < 40);
+    if (lane < 0 || p.worldX < X0 - 20 || p.worldX > X1 + 20) return;
+    const slot = SLOTS.findIndex((_, i) => Math.abs(p.worldX - slotX(i)) < 44);
     if (slot < 0) return this.nudge("Stations go on the yellow slots.");
     const L = this.f.lanes[lane];
     const st = L.slots[slot];

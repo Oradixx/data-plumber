@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { nextStep } from "../core/story.ts";
 import { LEVELS } from "../data/levels.ts";
-import { C, save } from "../theme.ts";
+import { C, R, save } from "../theme.ts";
 
 /**
  * Every illustration is drawn in code and baked into a texture once:
@@ -55,11 +55,11 @@ export class BootScene extends Phaser.Scene {
 
     const s = this.add.graphics();
     s.fillStyle(0xffffff, 1).fillCircle(6, 6, 6);
-    s.generateTexture("spark", 12, 12).destroy();
+    s.generateTexture("spark", 12, 12).destroy(); // particles: kept at 1×
 
     const star = this.add.graphics();
     star.fillStyle(0xffffff, 1).fillPoints(this.starPoints(32, 32, 30, 13), true);
-    star.generateTexture("star", 64, 64).destroy();
+    this.bake(star, "star", 64, 64);
 
     // Wait for the web font so the first texts render with it.
     const fontReady = document.fonts?.load('600 24px "Fredoka"').catch(() => undefined);
@@ -69,6 +69,25 @@ export class BootScene extends Phaser.Scene {
       if (step.scene === "story" && step.data.id === "prologue") this.scene.start("story", step.data);
       else this.scene.start("menu");
     });
+  }
+
+  /**
+   * Bake a Graphics drawing into a texture at R× resolution, displayed at its nominal size
+   * (the frame is "trimmed" down to w×h), so images stay sharp when the camera zooms by R.
+   */
+  private bake(g: Phaser.GameObjects.Graphics, key: string, w: number, h: number): void {
+    g.setScale(R);
+    g.generateTexture(key, w * R, h * R);
+    g.destroy();
+    if (R === 1) return;
+    // the texture holds w·R × h·R pixels, but the game object should measure w × h:
+    // the renderer divides the quad by the source resolution, Size uses realWidth
+    const tex = this.textures.get(key);
+    tex.source[0].resolution = R;
+    // `data` is public at runtime but missing from the type definitions
+    const data = (tex.get() as unknown as { data: { sourceSize: { w: number; h: number } } }).data;
+    data.sourceSize.w = w;
+    data.sourceSize.h = h;
   }
 
   private blob(keyName: string, fill: number, dark: number, mood: "happy" | "meh"): void {
@@ -86,7 +105,7 @@ export class BootScene extends Phaser.Scene {
     } else {
       g.lineStyle(3, 0x2b2340, 1).lineBetween(19, 35, 29, 34);
     }
-    g.generateTexture(keyName, 48, 48).destroy();
+    this.bake(g, keyName, 48, 48);
   }
 
   private station(keyName: string, fill: number, dark: number, icon: (g: Phaser.GameObjects.Graphics) => void): void {
@@ -97,7 +116,7 @@ export class BootScene extends Phaser.Scene {
     // little chimney lights
     g.fillStyle(0xffffff, 0.9).fillCircle(14, 50, 2.5).fillCircle(22, 50, 2.5);
     icon(g);
-    g.generateTexture(keyName, 64, 64).destroy();
+    this.bake(g, keyName, 64, 64);
   }
 
   private pad(): void {
@@ -106,7 +125,7 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(C.pad, 1).fillCircle(32, 32, 26);
     g.lineStyle(3, C.padDark, 1).strokeCircle(32, 32, 18);
     g.fillStyle(C.padDark, 1).fillCircle(32, 12, 3).fillCircle(32, 52, 3).fillCircle(12, 32, 3).fillCircle(52, 32, 3);
-    g.generateTexture("pad", 64, 64).destroy();
+    this.bake(g, "pad", 64, 64);
   }
 
   private boxOverlay(): void {
@@ -116,7 +135,7 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(C.boxDark, 1).fillRect(22, 8, 8, 36); // tape
     g.fillStyle(0xffffff, 0.9).fillCircle(26, 30, 8);
     g.fillStyle(C.boxDark, 1).fillRect(24, 26, 4, 6).fillCircle(26, 35, 2); // "!"
-    g.generateTexture("box", 52, 52).destroy();
+    this.bake(g, "box", 52, 52);
   }
 
   private shades(): void {
@@ -124,7 +143,7 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0x1b1428, 1).fillRoundedRect(2, 2, 18, 12, 5).fillRoundedRect(26, 2, 18, 12, 5);
     g.lineStyle(3, 0x1b1428, 1).lineBetween(18, 6, 28, 6);
     g.fillStyle(0xffffff, 0.5).fillRect(6, 5, 5, 2).fillRect(30, 5, 5, 2);
-    g.generateTexture("shades", 46, 16).destroy();
+    this.bake(g, "shades", 46, 16);
   }
 
   private lock(): void {
@@ -132,7 +151,7 @@ export class BootScene extends Phaser.Scene {
     g.lineStyle(4, 0x3a2e4f, 1).strokeCircle(12, 10, 6);
     g.fillStyle(0x3a2e4f, 1).fillRoundedRect(3, 10, 18, 14, 4);
     g.fillStyle(0xffd166, 1).fillCircle(12, 17, 2.5);
-    g.generateTexture("lock", 24, 26).destroy();
+    this.bake(g, "lock", 24, 26);
   }
 
   private source(): void {
@@ -145,7 +164,7 @@ export class BootScene extends Phaser.Scene {
     // windows
     g.fillStyle(0xffffff, 0.9).fillRoundedRect(16, 24, 16, 12, 3).fillRoundedRect(40, 24, 16, 12, 3);
     g.fillStyle(0xffffff, 0.35).fillRoundedRect(16, 44, 40, 12, 4);
-    g.generateTexture("source", 72, 72).destroy();
+    this.bake(g, "source", 72, 72);
   }
 
   private sink(): void {
@@ -155,7 +174,7 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(C.sinkDark, 1).fillTriangle(0, 26, 36, 2, 72, 26); // roof
     g.fillStyle(0xffffff, 0.9).fillRoundedRect(24, 38, 24, 26, 5); // door
     g.lineStyle(3, C.sink, 1).lineBetween(24, 46, 48, 46).lineBetween(24, 54, 48, 54);
-    g.generateTexture("sink", 72, 72).destroy();
+    this.bake(g, "sink", 72, 72);
   }
 
   /** Ada, the lead data engineer: a big pink blob with round glasses and an on-call headset. */
@@ -177,7 +196,7 @@ export class BootScene extends Phaser.Scene {
     // smile + cheeks
     g.lineStyle(4, 0x2b2340, 1).beginPath().arc(cx, 80, 9, 0.15 * Math.PI, 0.85 * Math.PI).strokePath();
     g.fillStyle(0xffffff, 0.35).fillEllipse(cx - 32, 80, 12, 7).fillEllipse(cx + 32, 80, 12, 7);
-    g.generateTexture("ada", 120, 112).destroy();
+    this.bake(g, "ada", 120, 112);
   }
 
   /** Trash bin for Clean or Trash. */
@@ -188,7 +207,7 @@ export class BootScene extends Phaser.Scene {
     g.lineStyle(4, 0xd9485f, 1).lineBetween(24, 30, 24, 58).lineBetween(36, 30, 36, 58).lineBetween(48, 30, 48, 58);
     g.fillStyle(0xd9485f, 1).fillRoundedRect(4, 10, 64, 10, 5); // lid
     g.fillRoundedRect(28, 4, 16, 8, 3); // handle
-    g.generateTexture("bin", 72, 72).destroy();
+    this.bake(g, "bin", 72, 72);
   }
 
   private crate(): void {
@@ -197,7 +216,7 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(C.crate, 1).fillRoundedRect(4, 4, 56, 54, 10);
     g.lineStyle(4, C.crateDark, 1).strokeRoundedRect(10, 10, 44, 42, 6);
     g.lineBetween(12, 12, 52, 50).lineBetween(52, 12, 12, 50);
-    g.generateTexture("crate", 64, 64).destroy();
+    this.bake(g, "crate", 64, 64);
   }
 
   private starPoints(cx: number, cy: number, outer: number, inner: number): Phaser.Math.Vector2[] {

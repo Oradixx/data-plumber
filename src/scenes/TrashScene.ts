@@ -263,7 +263,7 @@ export class TrashScene extends Phaser.Scene {
     const card = this.add.container(CARD_X, CARD_Y - 260, items).setSize(CARD_W, CARD_H).setDepth(10);
     card.setInteractive({ useHandCursor: true, draggable: false });
     card.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      if (!this.busy && !this.paused) this.dragFrom = p.x;
+      if (!this.busy && !this.paused) this.dragFrom = p.worldX;
     });
     this.tweens.add({ targets: card, y: CARD_Y, duration: 260, ease: "Back.out" });
     this.card = card;
@@ -272,7 +272,7 @@ export class TrashScene extends Phaser.Scene {
 
   private onDrag(p: Phaser.Input.Pointer): void {
     if (this.dragFrom === null || !this.card || this.busy) return;
-    const dx = p.x - this.dragFrom;
+    const dx = p.worldX - this.dragFrom;
     this.card.x = CARD_X + dx;
     this.card.angle = dx * 0.05;
     this.stamp(dx > 0 ? "keep" : "trash", Math.min(1, Math.abs(dx) / SWIPE));
@@ -280,7 +280,7 @@ export class TrashScene extends Phaser.Scene {
 
   private onRelease(p: Phaser.Input.Pointer): void {
     if (this.dragFrom === null) return;
-    const dx = p.x - this.dragFrom;
+    const dx = p.worldX - this.dragFrom;
     this.dragFrom = null;
     if (!this.card || this.busy) return;
     if (dx > SWIPE) this.answer("keep");
