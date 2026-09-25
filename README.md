@@ -1,6 +1,34 @@
 # Data Plumber
 
-**▶ Play: https://oradixx.github.io/data-plumber/**
+[![Deploy](https://github.com/Oradixx/data-plumber/actions/workflows/deploy.yml/badge.svg)](https://github.com/Oradixx/data-plumber/actions/workflows/deploy.yml)
+![Phaser 4](https://img.shields.io/badge/Phaser-4-8b5cf6)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
+
+**▶ Play in the browser: https://oradixx.github.io/data-plumber/** (desktop or mobile, no install)
+
+<p align="center">
+  <a href="https://oradixx.github.io/data-plumber/"><img src="docs/demo.gif" width="720" alt="Level 9: a pipe is drawn from the API to the warehouse, Parse, Filter, Normalize, Dedup and Mask stations are placed, and the data blobs flow through to a 3-star result"></a>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/map.png" alt="Story map: chapter 1, eleven Data Plumber levels, the bosses and Data Factory"></td>
+    <td width="50%"><img src="docs/trash.png" alt="Clean or Trash: a data row to keep or trash, with the quality rules unlocked so far"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Story map</b>: 3 chapters, 11 puzzle levels including 2 bosses</td>
+    <td align="center"><b>Clean or Trash</b>: be the quality gate, by hand</td>
+  </tr>
+  <tr>
+    <td><img src="docs/boss.png" alt="Final boss briefing: public warehouse, typed pads, one-way conveyors, a bolted legacy Mask"></td>
+    <td><img src="docs/factory.png" alt="Data Factory: three live conveyor lanes with stations, credits and an SLA bar"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Final boss</b>: hundreds of routes, exactly one works</td>
+    <td align="center"><b>Data Factory</b>: keep the SLA up in real time</td>
+  </tr>
+</table>
 
 A casual puzzle game about data pipelines. Lay a pipe from the API to the warehouse,
 drop stations on it (Filter, Dedup…) and press **Run**: cute data blobs flow through,
